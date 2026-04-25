@@ -208,7 +208,14 @@ class MainActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("Nearby Devices:", style = MaterialTheme.typography.titleSmall)
                     LazyColumn(modifier = Modifier.height(200.dp)) {
-                        items(discoveredDevices) { device ->
+                        // Temporary hack: Filter devices containing "HUAWEI"
+                        val filteredDevices = discoveredDevices.filter { device ->
+                            @SuppressLint("MissingPermission")
+                            val name = device.name ?: ""
+                            name.contains("HUAWEI", ignoreCase = true)
+                        }
+                        
+                        items(filteredDevices) { device ->
                             @SuppressLint("MissingPermission")
                             val deviceName = device.name ?: "Unknown Device"
                             Text(
