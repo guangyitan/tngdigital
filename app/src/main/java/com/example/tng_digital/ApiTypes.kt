@@ -56,5 +56,10 @@ data class ServerTransaction(
     val fromUserId: String,
     val toMerchantId: String,
     val status: String,       // "pending" | "completed" | "failed"
-    val syncStatus: String    // "pending_sync" | "synced"
+    val syncStatus: String,   // "pending_sync" | "synced"
+    val signature: String = "",
+    val userPubKey: String = "",
+    val cert: String = "",
+    val ackSignature: String = "",
+    val merchantPubKey: String = ""
 )

@@ -264,8 +264,9 @@ class MainActivity : FragmentActivity() {
                     sessionInitialized = true
                     syncMessage = "Session initialized: $sessionDisplayName"
                 } catch (e: Exception) {
-                    // Offline — use local values silently
+                    Log.e("TransactApp", "Session init failed", e)
                     sessionInitialized = true
+                    syncMessage = "Offline mode: ${e.message ?: "Could not reach server."}"
                 }
             }
         }
@@ -287,7 +288,8 @@ class MainActivity : FragmentActivity() {
                         syncMessage = "${res.syncedTxIds.size} transaction(s) pushed to server."
                     }
                 } catch (e: Exception) {
-                    syncMessage = "Push failed. Could not reach server."
+                    Log.e("TransactApp", "Push failed", e)
+                    syncMessage = "Push failed: ${e.message ?: "Could not reach server."}"
                 } finally {
                     isPushing = false
                 }
@@ -302,12 +304,14 @@ class MainActivity : FragmentActivity() {
                     val role = if (appRole == AppRole.CONSUMER) "user" else "merchant"
                     val deviceId = txManager?.deviceId ?: "unknown"
                     val res = ApiClient.pullAccount(PullRequest(deviceId = deviceId, role = role))
-                    if (appRole == AppRole.CONSUMER) {
+                    if (appRole == AppRole.CONSUMER && res.offlineBalance >= 0) {
                         txManager?.localBalance = res.offlineBalance
                     }
-                    syncMessage = "Updated. Offline Balance: MYR ${"%.2f".format(res.offlineBalance)}, ${res.transactions.size} tx(s) synced."
+                    val balanceStr = if (res.offlineBalance >= 0) "MYR ${"%.2f".format(res.offlineBalance)}" else "unchanged"
+                    syncMessage = "Updated. Offline Balance: $balanceStr, ${res.transactions.size} tx(s) synced."
                 } catch (e: Exception) {
-                    syncMessage = "Pull failed. Could not reach server."
+                    Log.e("TransactApp", "Pull failed", e)
+                    syncMessage = "Pull failed: ${e.message ?: "Could not reach server."}"
                 } finally {
                     isPulling = false
                 }

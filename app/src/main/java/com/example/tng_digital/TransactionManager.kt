@@ -447,6 +447,17 @@ class TransactionManager(
     // ─── Sync Queue Integration ──────────────────────────────────────────────
 
     private fun queueForSync(receipt: TxReceipt, side: String) {
+        val req = pendingRequest
+        val certJson = req?.consumerCertificate?.let {
+            JSONObject().apply {
+                put("consumer_id", it.consumerId)
+                put("device_id", it.deviceId)
+                put("public_key", it.publicKey)
+                put("expiry", it.expiry)
+                put("max_offline_spend_limit", it.maxOfflineSpendLimit)
+                put("ca_signature", it.caSignature)
+            }.toString()
+        } ?: ""
         val serverTx = ServerTransaction(
             id = receipt.txId,
             amount = receipt.amount,
@@ -455,7 +466,12 @@ class TransactionManager(
             fromUserId = receipt.consumerId,
             toMerchantId = receipt.vendorId,
             status = "completed",
-            syncStatus = "pending_sync"
+            syncStatus = "pending_sync",
+            signature = receipt.consumerSignatureRef,
+            userPubKey = req?.consumerCertificate?.publicKey ?: signingPublicKeyB64,
+            cert = certJson,
+            ackSignature = receipt.vendorSignature,
+            merchantPubKey = signingPublicKeyB64
         )
         SyncQueue.addToQueue(receipt.txId, side, serverTx)
     }

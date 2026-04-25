@@ -2,7 +2,6 @@ package com.example.tng_digital
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,48 +11,51 @@ import java.net.URL
 object ApiClient {
 
     private const val TAG = "ApiClient"
-    private const val USE_MOCK = true
-    private const val BACKEND_URL = "http://localhost:3000"
+    private const val BACKEND_URL = "http://finhack-alb-2062571595.ap-southeast-5.elb.amazonaws.com"
+    private const val TIMEOUT_MS = 10_000
 
-    // ─── Session Init ─────────────────────────────────────────────────────────
+    // ─── Session Init (GET with JSON body per spec) ──────────────────────────
 
     suspend fun initSession(req: SessionInitRequest): SessionInitResponse {
-        if (USE_MOCK) return mockInitSession(req)
         return withContext(Dispatchers.IO) {
-            val url = URL("$BACKEND_URL/session/init")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                doOutput = true
-            }
+            val conn = openConnection("$BACKEND_URL/session/init", "GET")
+            // Spec sends JSON body even on GET
+            conn.doOutput = true
             val body = JSONObject().apply {
                 put("deviceId", req.deviceId)
                 put("role", req.role)
             }
             conn.outputStream.bufferedWriter().use { it.write(body.toString()) }
-            if (conn.responseCode != 200) throw Exception("Session init failed: ${conn.responseCode}")
-            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+
+            val code = conn.responseCode
+            if (code != 200) {
+                val errBody = readErrorBody(conn)
+                throw ApiException("Session init failed (HTTP $code): $errBody")
+            }
+
+            val json = try {
+                JSONObject(conn.inputStream.bufferedReader().readText())
+            } catch (e: Exception) {
+                throw ApiException("Session init: invalid JSON response")
+            }
+
             SessionInitResponse(
-                userId = json.getString("userId"),
-                displayName = json.getString("displayName"),
-                offlineBalance = json.getDouble("offlineBalance"),
-                status = json.getString("status"),
+                userId = json.optString("userId", req.deviceId),
+                displayName = json.optString("displayName", req.deviceId),
+                offlineBalance = json.optDouble("offlineBalance", 1000.0),
+                status = json.optString("status", "active"),
                 merchantName = json.optString("merchantName", null)
             )
         }
     }
 
-    // ─── Push Transactions ────────────────────────────────────────────────────
+    // ─── Push Transactions (POST) ────────────────────────────────────────────
 
     suspend fun pushTransactions(req: SyncRequest): SyncResponse {
-        if (USE_MOCK) return mockPushTransactions(req)
         return withContext(Dispatchers.IO) {
-            val url = URL("$BACKEND_URL/sync/push")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                doOutput = true
-            }
+            val conn = openConnection("$BACKEND_URL/sync/push", "POST")
+            conn.doOutput = true
+
             val txArray = JSONArray()
             req.transactions.forEach { item ->
                 txArray.put(JSONObject().apply {
@@ -69,6 +71,11 @@ object ApiClient {
                         put("toMerchantId", item.tx.toMerchantId)
                         put("status", item.tx.status)
                         put("syncStatus", item.tx.syncStatus)
+                        put("signature", item.tx.signature)
+                        put("userPubKey", item.tx.userPubKey)
+                        put("cert", item.tx.cert)
+                        put("ackSignature", item.tx.ackSignature)
+                        put("merchantPubKey", item.tx.merchantPubKey)
                     })
                 })
             }
@@ -77,97 +84,116 @@ object ApiClient {
                 put("transactions", txArray)
             }
             conn.outputStream.bufferedWriter().use { it.write(body.toString()) }
-            if (conn.responseCode != 200) throw Exception("Push failed: ${conn.responseCode}")
-            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+
+            val code = conn.responseCode
+            if (code != 200) {
+                val errBody = readErrorBody(conn)
+                throw ApiException("Push failed (HTTP $code): $errBody")
+            }
+
+            val json = try {
+                JSONObject(conn.inputStream.bufferedReader().readText())
+            } catch (e: Exception) {
+                // If server returns success but unexpected body, treat all as synced
+                Log.w(TAG, "Push: unexpected response body, treating all as synced")
+                val allIds = req.transactions.map { it.txId }
+                return@withContext SyncResponse(syncedTxIds = allIds, failedTxIds = emptyList())
+            }
+
             val synced = mutableListOf<String>()
             val failed = mutableListOf<String>()
-            json.getJSONArray("syncedTxIds").let { arr ->
+            json.optJSONArray("syncedTxIds")?.let { arr ->
                 for (i in 0 until arr.length()) synced.add(arr.getString(i))
             }
-            json.getJSONArray("failedTxIds").let { arr ->
+            json.optJSONArray("failedTxIds")?.let { arr ->
                 for (i in 0 until arr.length()) failed.add(arr.getString(i))
             }
+
+            // If server returned 200 but no syncedTxIds, assume all synced
+            if (synced.isEmpty() && failed.isEmpty()) {
+                val allIds = req.transactions.map { it.txId }
+                return@withContext SyncResponse(syncedTxIds = allIds, failedTxIds = emptyList())
+            }
+
             SyncResponse(syncedTxIds = synced, failedTxIds = failed)
         }
     }
 
-    // ─── Pull Account ─────────────────────────────────────────────────────────
+    // ─── Pull Account (GET with query params) ────────────────────────────────
 
     suspend fun pullAccount(req: PullRequest): PullResponse {
-        if (USE_MOCK) return mockPullAccount(req)
         return withContext(Dispatchers.IO) {
-            val url = URL("$BACKEND_URL/account?deviceId=${req.deviceId}&role=${req.role}")
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                setRequestProperty("Content-Type", "application/json")
+            val conn = openConnection(
+                "$BACKEND_URL/account?deviceId=${req.deviceId}&role=${req.role}",
+                "GET"
+            )
+
+            val code = conn.responseCode
+            if (code != 200) {
+                val errBody = readErrorBody(conn)
+                throw ApiException("Pull failed (HTTP $code): $errBody")
             }
-            if (conn.responseCode != 200) throw Exception("Pull failed: ${conn.responseCode}")
-            val json = JSONObject(conn.inputStream.bufferedReader().readText())
+
+            val json = try {
+                JSONObject(conn.inputStream.bufferedReader().readText())
+            } catch (e: Exception) {
+                throw ApiException("Pull: invalid JSON response")
+            }
+
             val txs = mutableListOf<ServerTransaction>()
-            json.getJSONArray("transactions").let { arr ->
+            json.optJSONArray("transactions")?.let { arr ->
                 for (i in 0 until arr.length()) {
                     val t = arr.getJSONObject(i)
                     txs.add(ServerTransaction(
-                        id = t.getString("id"),
-                        amount = t.getDouble("amount"),
-                        currency = t.getString("currency"),
-                        timestamp = t.getLong("timestamp"),
-                        fromUserId = t.getString("fromUserId"),
-                        toMerchantId = t.getString("toMerchantId"),
-                        status = t.getString("status"),
-                        syncStatus = t.getString("syncStatus")
+                        id = t.optString("id", ""),
+                        amount = t.optDouble("amount", 0.0),
+                        currency = t.optString("currency", "MYR"),
+                        timestamp = t.optLong("timestamp", 0L),
+                        fromUserId = t.optString("fromUserId", ""),
+                        toMerchantId = t.optString("toMerchantId", ""),
+                        status = t.optString("status", "completed"),
+                        syncStatus = t.optString("syncStatus", "synced"),
+                        signature = t.optString("signature", ""),
+                        userPubKey = t.optString("userPubKey", ""),
+                        cert = t.optString("cert", ""),
+                        ackSignature = t.optString("ackSignature", ""),
+                        merchantPubKey = t.optString("merchantPubKey", "")
                     ))
                 }
             }
+
+            // Also mark local queue items as synced based on server data
+            val serverSyncedIds = txs.filter { it.syncStatus == "synced" }.map { it.id }
+            if (serverSyncedIds.isNotEmpty()) {
+                SyncQueue.markSynced(serverSyncedIds)
+            }
+
             PullResponse(
-                offlineBalance = json.getDouble("offlineBalance"),
+                offlineBalance = json.optDouble("offlineBalance", -1.0),
                 transactions = txs
             )
         }
     }
 
-    // ─── Mock Implementations ─────────────────────────────────────────────────
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private suspend fun mockInitSession(req: SessionInitRequest): SessionInitResponse {
-        delay(800)
-        val last6 = req.deviceId.takeLast(6)
-        return if (req.role == "merchant") {
-            SessionInitResponse(
-                userId = req.deviceId,
-                displayName = req.deviceId,
-                offlineBalance = 0.0,
-                status = "active",
-                merchantName = "Store $last6"
-            )
-        } else {
-            SessionInitResponse(
-                userId = req.deviceId,
-                displayName = "User $last6",
-                offlineBalance = 1000.0,
-                status = "active"
-            )
+    private fun openConnection(urlStr: String, method: String): HttpURLConnection {
+        val url = URL(urlStr)
+        return (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = method
+            setRequestProperty("Content-Type", "application/json")
+            connectTimeout = TIMEOUT_MS
+            readTimeout = TIMEOUT_MS
         }
     }
 
-    private suspend fun mockPushTransactions(req: SyncRequest): SyncResponse {
-        delay(1000)
-        val syncedTxIds = req.transactions.map { it.txId }
-        return SyncResponse(syncedTxIds = syncedTxIds, failedTxIds = emptyList())
+    private fun readErrorBody(conn: HttpURLConnection): String {
+        return try {
+            conn.errorStream?.bufferedReader()?.readText() ?: "no error body"
+        } catch (e: Exception) {
+            "could not read error body"
+        }
     }
 
-    private suspend fun mockPullAccount(req: PullRequest): PullResponse {
-        delay(600)
-        val queue = SyncQueue.getQueue(req.role)
-        // Compute balance: for consumer, subtract all tx amounts from initial 1000
-        val totalSpent = if (req.role == "user") queue.sumOf { it.tx.amount } else 0.0
-        val totalEarned = if (req.role == "merchant") queue.sumOf { it.tx.amount } else 0.0
-        val balance = if (req.role == "merchant") totalEarned else 1000.0 - totalSpent
-        // Mark all as synced in mock
-        val syncedTxIds = queue.map { it.txId }
-        SyncQueue.markSynced(syncedTxIds)
-        return PullResponse(
-            offlineBalance = balance,
-            transactions = queue.map { it.tx.copy(syncStatus = "synced") }
-        )
-    }
+    class ApiException(message: String) : Exception(message)
 }
