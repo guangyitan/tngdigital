@@ -155,13 +155,16 @@ class MainActivity : ComponentActivity() {
                         isConnecting = false
                     }
                 }
-            ).also { bluetoothService = it }
+            ).also { 
+                bluetoothService = it
+                // Automatically start server on home page so device is ready to receive
+                it.startServer()
+            }
         }
 
         // Handle navigation after successful pairing
         onPairingSuccess = {
             role = "Receiver"
-            service.startServer()
             isConnecting = true
         }
 
@@ -180,6 +183,19 @@ class MainActivity : ComponentActivity() {
             Spacer(modifier = Modifier.height(8.dp))
 
             if (role == null) {
+                // Show Messaging UI by default as "Receiver" on home page
+                MessagingUI(
+                    messages = messages,
+                    onSendMessage = { msg ->
+                        service.sendMessage(msg)
+                        messages = messages + "Sent: $msg"
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+
                 RoleSelection(
                     onRoleSelected = { selectedRole ->
                         role = selectedRole
@@ -344,7 +360,7 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text("Messages:")
-            LazyColumn(modifier = Modifier.fillMaxHeight(0.7f)) {
+            LazyColumn(modifier = Modifier.height(200.dp)) {
                 items(messages) { msg ->
                     Text(msg, modifier = Modifier.padding(4.dp))
                 }
