@@ -612,7 +612,7 @@ class MainActivity : FragmentActivity() {
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "${transactions.size} pending transaction(s)",
+                        "${transactions.count { it.tx.syncStatus != "synced" }} pending, ${transactions.size} total transaction(s)",
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 14.sp
                     )
@@ -732,7 +732,7 @@ class MainActivity : FragmentActivity() {
         onPull: () -> Unit,
         onDismissSync: () -> Unit
     ) {
-        val pendingCount = SyncQueue.pendingCount(side)
+        val pendingCount = remember(syncMessage, isPushing, isPulling) { SyncQueue.pendingCount(side) }
 
         // Sync message banner
         if (syncMessage != null) {
