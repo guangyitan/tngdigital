@@ -11,15 +11,15 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
 import android.util.Log
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -40,7 +40,7 @@ import androidx.core.content.ContextCompat
 import com.example.tng_digital.ui.theme.TngdigitalTheme
 import com.google.zxing.integration.android.IntentIntegrator
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val bluetoothManager by lazy { getSystemService(BluetoothManager::class.java) }
     private val bluetoothAdapter: BluetoothAdapter? by lazy { bluetoothManager?.adapter }
