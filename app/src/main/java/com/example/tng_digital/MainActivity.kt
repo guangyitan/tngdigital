@@ -159,6 +159,20 @@ class MainActivity : ComponentActivity() {
                 bluetoothService = it
                 // Automatically start server on home page so device is ready to receive
                 it.startServer()
+
+                // NEW: Auto-connect logic for pre-paired devices
+                val pairedHuaweiDevice = adapter.bondedDevices.find { device ->
+                    @SuppressLint("MissingPermission")
+                    val name = device.name ?: ""
+                    name.contains("HUAWEI", ignoreCase = true)
+                }
+                
+                pairedHuaweiDevice?.let { device ->
+                    Log.d("MainActivity", "Found pre-paired HUAWEI device: ${device.address}. Auto-connecting...")
+                    isConnecting = true
+                    role = "Receiver"
+                    it.connectToDevice(device)
+                }
             }
         }
 
@@ -168,106 +182,13 @@ class MainActivity : ComponentActivity() {
             isConnecting = true
         }
 
-        Column(modifier = Modifier.padding(16.dp)) {
-            if (isConnecting) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Connecting...")
-                    }
-                }
-            }
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(text = "Status: $status", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
 
-            Text(text = "Status: $status", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (role == null) {
-                // Show Messaging UI by default as "Receiver" on home page
-                MessagingUI(
-                    messages = messages,
-                    onSendMessage = { msg ->
-                        service.sendMessage(msg)
-                        messages = messages + "Sent: $msg"
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
-
-                RoleSelection(
-                    onRoleSelected = { selectedRole ->
-                        role = selectedRole
-                        if (selectedRole == "Receiver") {
-                            service.startServer()
-                        }
-                    },
-                    onDiscoverable = {
-                        val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
-                            putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
-                        }
-                        startActivity(discoverableIntent)
-                    },
-                    onStartDiscovery = {
-                        if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                            discoveredDevices.clear()
-                            adapter.startDiscovery()
-                            isScanning = true
-                        } else {
-                            Toast.makeText(this@MainActivity, "Scan permission required", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                )
-
-                if (isScanning || discoveredDevices.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Nearby Devices:", style = MaterialTheme.typography.titleSmall)
-                    LazyColumn(modifier = Modifier.height(200.dp)) {
-                        // Temporary hack: Filter devices containing "HUAWEI"
-                        val filteredDevices = discoveredDevices.filter { device ->
-                            @SuppressLint("MissingPermission")
-                            val name = device.name ?: ""
-                            name.contains("HUAWEI", ignoreCase = true)
-                        }
-                        
-                        items(filteredDevices) { device ->
-                            @SuppressLint("MissingPermission")
-                            val deviceName = device.name ?: "Unknown Device"
-                            Text(
-                                text = "$deviceName (${device.address})",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { 
-                                        Log.d("MainActivity", "Device selected: $deviceName (${device.address})")
-                                        adapter.cancelDiscovery()
-                                        isScanning = false
-                                        
-                                        if (device.bondState == BluetoothDevice.BOND_NONE) {
-                                            Log.d("MainActivity", "Device not paired. Creating bond...")
-                                            device.createBond()
-                                            // Don't set role yet, wait for bond success via onPairingSuccess
-                                        } else {
-                                            Log.d("MainActivity", "Device already paired. Connecting...")
-                                            role = "Receiver"
-                                            isConnecting = true
-                                            service.startServer()
-                                        }
-                                    }
-                                    .padding(8.dp)
-                            )
-                        }
-                    }
-                }
-            } else {
-                Text(text = "Role: $role", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                if (role == "Sender" && status != "Connected") {
-                    DeviceList(adapter) { device ->
-                        service.connectToDevice(device)
-                    }
-                } else {
+                if (role == null) {
+                    // Show Messaging UI by default as "Receiver" on home page
                     MessagingUI(
                         messages = messages,
                         onSendMessage = { msg ->
@@ -275,14 +196,114 @@ class MainActivity : ComponentActivity() {
                             messages = messages + "Sent: $msg"
                         }
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    RoleSelection(
+                        onRoleSelected = { selectedRole ->
+                            role = selectedRole
+                            if (selectedRole == "Receiver") {
+                                service.startServer()
+                            }
+                        },
+                        onDiscoverable = {
+                            val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
+                                putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+                            }
+                            startActivity(discoverableIntent)
+                        },
+                        onStartDiscovery = {
+                            if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                                discoveredDevices.clear()
+                                adapter.startDiscovery()
+                                isScanning = true
+                            } else {
+                                Toast.makeText(this@MainActivity, "Scan permission required", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+
+                    if (isScanning || discoveredDevices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Nearby Devices:", style = MaterialTheme.typography.titleSmall)
+                        LazyColumn(modifier = Modifier.height(200.dp)) {
+                            // Temporary hack: Filter devices containing "HUAWEI"
+                            val filteredDevices = discoveredDevices.filter { device ->
+                                @SuppressLint("MissingPermission")
+                                val name = device.name ?: ""
+                                name.contains("HUAWEI", ignoreCase = true)
+                            }
+                            
+                            items(filteredDevices) { device ->
+                                @SuppressLint("MissingPermission")
+                                val deviceName = device.name ?: "Unknown Device"
+                                Text(
+                                    text = "$deviceName (${device.address})",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { 
+                                            Log.d("MainActivity", "Device selected: $deviceName (${device.address})")
+                                            adapter.cancelDiscovery()
+                                            isScanning = false
+                                            
+                                            if (device.bondState == BluetoothDevice.BOND_NONE) {
+                                                Log.d("MainActivity", "Device not paired. Creating bond...")
+                                                device.createBond()
+                                                // Don't set role yet, wait for bond success via onPairingSuccess
+                                            } else {
+                                                Log.d("MainActivity", "Device already paired. Connecting...")
+                                                role = "Receiver"
+                                                isConnecting = true
+                                                service.connectToDevice(device) 
+                                            }
+                                        }
+                                        .padding(8.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Text(text = "Role: $role", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    if (role == "Sender" && status != "Connected") {
+                        DeviceList(adapter) { device ->
+                            service.connectToDevice(device)
+                        }
+                    } else {
+                        MessagingUI(
+                            messages = messages,
+                            onSendMessage = { msg ->
+                                service.sendMessage(msg)
+                                messages = messages + "Sent: $msg"
+                            }
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = { 
+                        service.stop()
+                        role = null 
+                    }) {
+                        Text("Reset Role")
+                    }
                 }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { 
-                    service.stop()
-                    role = null 
-                }) {
-                    Text("Reset Role")
+            }
+
+            if (isConnecting) {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.8f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Connecting...")
+                        }
+                    }
                 }
             }
         }
