@@ -141,7 +141,12 @@ class BluetoothService(
     @Synchronized
     fun connectToDevice(device: BluetoothDevice) {
         stop()
-        onStatusChanged("Connecting to ${device.name ?: device.address}...")
+        val deviceName = try {
+            device.name ?: device.address
+        } catch (e: SecurityException) {
+            device.address
+        }
+        onStatusChanged("Connecting to $deviceName...")
         connectThread = ConnectThread(device).apply { start() }
     }
 
