@@ -11,9 +11,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.provider.Settings
+import android.util.Log
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-import android.util.Log
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -140,9 +141,28 @@ class MainActivity : FragmentActivity() {
 
     // ─── Main Composable ─────────────────────────────────────────────────────────
 
+    @SuppressLint("MissingPermission")
     @Composable
     fun TransactApp(adapter: BluetoothAdapter?) {
         if (adapter == null) { Text("Bluetooth not supported"); return }
+
+        if (!adapter.isEnabled) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("Bluetooth is turned off", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Please enable Bluetooth to use TNG offline payments.", textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(onClick = { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
+                    modifier = Modifier.fillMaxWidth()) {
+                    Text("Open Bluetooth Settings")
+                }
+            }
+            return
+        }
 
         var appRole by remember { mutableStateOf<AppRole?>(null) }
         var btStatus by remember { mutableStateOf("Disconnected") }
