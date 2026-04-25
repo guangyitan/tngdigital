@@ -198,10 +198,6 @@ class MainActivity : FragmentActivity() {
             }
         }
 
-        onPairingSuccess = {
-            btService.startServer()
-        }
-
         when {
             appRole == null -> RoleSelectionScreen(
                 onConsumer = { appRole = AppRole.CONSUMER },
