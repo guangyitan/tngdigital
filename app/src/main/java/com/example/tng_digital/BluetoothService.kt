@@ -6,6 +6,8 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
 import android.util.Log
+import android.os.Handler
+import android.os.Looper
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -13,10 +15,14 @@ import java.util.UUID
 
 class BluetoothService(
     private val adapter: BluetoothAdapter?,
-    private val onMessageReceived: (String) -> Unit,
-    private val onStatusChanged: (String) -> Unit
+    onMessageReceived: (String) -> Unit = {},
+    onStatusChanged: (String) -> Unit = {}
 ) {
+    var onMessageReceived: (String) -> Unit = onMessageReceived
+    var onStatusChanged: (String) -> Unit = onStatusChanged
     private val tag = "BluetoothService"
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private fun postMain(action: () -> Unit) = mainHandler.post(action)
     private val serviceName = "TngDigitalBluetooth"
     private val serviceUuid: UUID = UUID.fromString("8ce255c0-200a-11e0-ac64-0800200c9a66")
 
@@ -72,7 +78,7 @@ class BluetoothService(
                     manageConnectedSocket(socket)
                 } catch (e: IOException) {
                     Log.e(tag, "Could not connect to socket", e)
-                    onStatusChanged("Connection failed")
+                    postMain { onStatusChanged("Connection failed") }
                     try {
                         socket.close()
                     } catch (closeException: IOException) {
@@ -94,23 +100,26 @@ class BluetoothService(
     inner class ConnectedThread(private val mmSocket: BluetoothSocket) : Thread() {
         private val mmInStream: InputStream = mmSocket.inputStream
         private val mmOutStream: OutputStream = mmSocket.outputStream
-        private val mmBuffer: ByteArray = ByteArray(1024)
+        private val readBuffer = ByteArray(4096)
 
         override fun run() {
-            onStatusChanged("Connected")
-            var numBytes: Int
-
+            postMain { onStatusChanged("Connected") }
+            val accumulator = StringBuilder()
             while (true) {
-                numBytes = try {
-                    mmInStream.read(mmBuffer)
+                val numBytes = try {
+                    mmInStream.read(readBuffer)
                 } catch (e: IOException) {
                     Log.d(tag, "Input stream was disconnected", e)
-                    onStatusChanged("Disconnected")
+                    postMain { onStatusChanged("Disconnected") }
                     break
                 }
-
-                val message = String(mmBuffer, 0, numBytes)
-                onMessageReceived(message)
+                accumulator.append(String(readBuffer, 0, numBytes, Charsets.UTF_8))
+                var newlineIdx: Int
+                while (accumulator.indexOf("\n").also { newlineIdx = it } != -1) {
+                    val message = accumulator.substring(0, newlineIdx).trim()
+                    accumulator.delete(0, newlineIdx + 1)
+                    if (message.isNotEmpty()) postMain { onMessageReceived(message) }
+                }
             }
         }
 
@@ -134,14 +143,19 @@ class BluetoothService(
     @Synchronized
     fun startServer() {
         stop()
-        onStatusChanged("Listening for connections...")
+        postMain { onStatusChanged("Listening for connections...") }
         acceptThread = AcceptThread().apply { start() }
     }
 
     @Synchronized
     fun connectToDevice(device: BluetoothDevice) {
         stop()
-        onStatusChanged("Connecting to ${device.name ?: device.address}...")
+        val deviceName = try {
+            device.name ?: device.address
+        } catch (e: SecurityException) {
+            device.address
+        }
+        postMain { onStatusChanged("Connecting to $deviceName...") }
         connectThread = ConnectThread(device).apply { start() }
     }
 
@@ -151,7 +165,7 @@ class BluetoothService(
     }
 
     fun sendMessage(message: String) {
-        connectedThread?.write(message.toByteArray())
+        connectedThread?.write("$message\n".toByteArray(Charsets.UTF_8))
     }
 
     @Synchronized
@@ -162,6 +176,6 @@ class BluetoothService(
         connectThread = null
         connectedThread?.cancel()
         connectedThread = null
-        onStatusChanged("Bluetooth service stopped")
+        postMain { onStatusChanged("Bluetooth service stopped") }
     }
 }
