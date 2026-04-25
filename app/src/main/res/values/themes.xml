@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Tngdigital" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Tngdigital" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/tng_blue</item>
+        <item name="android:navigationBarColor">@color/tng_blue</item>
+    </style>
 </resources>

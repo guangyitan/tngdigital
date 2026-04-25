@@ -22,23 +22,32 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.example.tng_digital.ui.theme.TngdigitalTheme
+import com.example.tng_digital.ui.theme.*
 import com.google.zxing.integration.android.IntentIntegrator
 
 class MainActivity : FragmentActivity() {
@@ -144,22 +153,50 @@ class MainActivity : FragmentActivity() {
     @SuppressLint("MissingPermission")
     @Composable
     fun TransactApp(adapter: BluetoothAdapter?) {
-        if (adapter == null) { Text("Bluetooth not supported"); return }
+        if (adapter == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Bluetooth not supported", color = TngTextSecondary, style = MaterialTheme.typography.titleMedium)
+            }
+            return
+        }
 
         if (!adapter.isEnabled) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(32.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(TngBgSecondary)
+                    .padding(32.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text("Bluetooth is turned off", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Please enable Bluetooth to use TNG offline payments.", textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(24.dp))
-                Button(onClick = { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) },
-                    modifier = Modifier.fillMaxWidth()) {
-                    Text("Open Bluetooth Settings")
+                // Bluetooth icon circle
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .background(TngErrorLight, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("!", fontSize = 36.sp, fontWeight = FontWeight.ExtraBold, color = TngError)
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    "Bluetooth is turned off",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TngTextPrimary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "Please enable Bluetooth to use TNG offline payments.",
+                    textAlign = TextAlign.Center,
+                    color = TngTextSecondary,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                TngPrimaryButton(
+                    text = "Open Bluetooth Settings",
+                    onClick = { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }
+                )
             }
             return
         }
@@ -324,6 +361,114 @@ class MainActivity : FragmentActivity() {
         prompt.authenticate(info)
     }
 
+    // ─── Shared UI Components ─────────────────────────────────────────────────────
+
+    @Composable
+    fun TngPrimaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+        Button(
+            onClick = onClick,
+            modifier = modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = TngYellow,
+                contentColor = TngTextPrimary
+            ),
+            elevation = ButtonDefaults.buttonElevation(
+                defaultElevation = 4.dp,
+                pressedElevation = 2.dp
+            )
+        ) {
+            Text(text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+
+    @Composable
+    fun TngSecondaryButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            shape = RoundedCornerShape(16.dp),
+            border = ButtonDefaults.outlinedButtonBorder(enabled = true).copy(
+                brush = Brush.linearGradient(listOf(TngBlue, TngBlue))
+            ),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = TngBlue
+            )
+        ) {
+            Text(text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+
+    @Composable
+    fun TngCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+        Card(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = TngBgCard),
+            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                content = content
+            )
+        }
+    }
+
+    @Composable
+    fun TngScreenHeader(title: String, subtitle: String? = null) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(TngBlue, TngBlueDark)
+                    ),
+                    shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+                )
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Column {
+                Text(
+                    title,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                if (subtitle != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        subtitle,
+                        fontSize = 13.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    fun StatusPill(label: String, value: String) {
+        Row(
+            modifier = Modifier
+                .background(
+                    Color.White.copy(alpha = 0.12f),
+                    RoundedCornerShape(999.dp)
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(value, color = TngYellow, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+
     // ─── Vendor Screen ────────────────────────────────────────────────────────────
 
     @Composable
@@ -344,61 +489,151 @@ class MainActivity : FragmentActivity() {
         }
 
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(TngBgSecondary),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Vendor Mode", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Status: $btStatus", style = MaterialTheme.typography.bodyMedium)
-            Text("TX State: ${txState.name}", style = MaterialTheme.typography.bodySmall)
-            Spacer(modifier = Modifier.height(12.dp))
-
-            when {
-                receipt != null -> ReceiptCard(receipt = receipt, isVendor = true)
-                errorMsg != null -> ErrorCard(errorMsg)
-                incomingRequest != null -> {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Incoming Payment", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("From: ${incomingRequest.consumerId}")
-                            Text("Amount: ${incomingRequest.currency} ${"%.2f".format(incomingRequest.amount)}")
-                            Spacer(modifier = Modifier.height(8.dp))
-                            when (txState) {
-                                TransactionState.ACK_RECEIVED -> {
-                                    CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                                    Text("ACK sent. Waiting for consumer confirmation...", textAlign = TextAlign.Center)
-                                }
-                                TransactionState.COMPLETED -> Text("✓ Payment received!", fontWeight = FontWeight.Bold)
-                                else -> Text("Processing... (${txState.name})")
-                            }
-                        }
+            // Blue header
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        brush = Brush.verticalGradient(listOf(TngBlue, TngBlueDark)),
+                        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+                    )
+                    .padding(horizontal = 24.dp, vertical = 20.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text("Vendor Mode", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatusPill(label = "Status", value = btStatus)
+                        StatusPill(label = "TX", value = txState.name)
                     }
-                }
-                else -> {
-                    qrBitmap?.let { bmp ->
-                        Text("Show this QR to the consumer:", style = MaterialTheme.typography.labelLarge)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "Vendor QR Code",
-                            modifier = Modifier.size(240.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(txManager?.merchantName ?: "", fontWeight = FontWeight.Medium)
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onMakeDiscoverable, modifier = Modifier.fillMaxWidth()) {
-                        Text("Make Device Discoverable (300s)")
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Waiting for consumer to connect…", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
-                Text("Back to Role Selection")
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                when {
+                    receipt != null -> ReceiptCard(receipt = receipt, isVendor = true)
+                    errorMsg != null -> ErrorCard(errorMsg)
+                    incomingRequest != null -> {
+                        TngCard {
+                            // Yellow accent strip
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .background(TngYellow, RoundedCornerShape(2.dp))
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                "INCOMING PAYMENT",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TngTextMuted,
+                                letterSpacing = 1.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("From: ${incomingRequest.consumerId}", color = TngTextSecondary)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "${incomingRequest.currency} ${"%.2f".format(incomingRequest.amount)}",
+                                fontSize = 32.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = TngTextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            when (txState) {
+                                TransactionState.ACK_RECEIVED -> {
+                                    CircularProgressIndicator(
+                                        color = TngBlue,
+                                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        "ACK sent. Waiting for consumer confirmation...",
+                                        textAlign = TextAlign.Center,
+                                        color = TngTextSecondary
+                                    )
+                                }
+                                TransactionState.COMPLETED -> {
+                                    Text(
+                                        "Payment received!",
+                                        fontWeight = FontWeight.Bold,
+                                        color = TngSuccess
+                                    )
+                                }
+                                else -> Text(
+                                    "Processing... (${txState.name})",
+                                    color = TngTextSecondary
+                                )
+                            }
+                        }
+                    }
+                    else -> {
+                        // QR Code display card
+                        TngCard {
+                            Text(
+                                "SHOW QR TO CONSUMER",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TngTextMuted,
+                                letterSpacing = 1.5.sp,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            qrBitmap?.let { bmp ->
+                                Box(
+                                    modifier = Modifier
+                                        .size(220.dp)
+                                        .align(Alignment.CenterHorizontally)
+                                        .border(1.dp, TngBorder, RoundedCornerShape(16.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Vendor QR Code",
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                txManager?.merchantName ?: "",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 17.sp,
+                                color = TngTextPrimary,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TngPrimaryButton(
+                            text = "Make Device Discoverable (300s)",
+                            onClick = onMakeDiscoverable
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "Waiting for consumer to connect...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TngTextMuted,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+
+            // Bottom button
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                TngSecondaryButton(text = "Back to Role Selection", onClick = onReset)
             }
         }
     }
@@ -427,72 +662,198 @@ class MainActivity : FragmentActivity() {
         onReset: () -> Unit
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(TngBgSecondary),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Consumer Mode", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Status: $btStatus", style = MaterialTheme.typography.bodyMedium)
-            Text("Balance: MYR ${"%.2f".format(txManager?.localBalance ?: 500.0)}", style = MaterialTheme.typography.bodySmall)
-            Spacer(modifier = Modifier.height(12.dp))
+            // Blue header with balance
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        brush = Brush.verticalGradient(listOf(TngBlue, TngBlueDark)),
+                        shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+                    )
+                    .padding(horizontal = 24.dp, vertical = 20.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text("Consumer Mode", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        StatusPill(label = "Status", value = btStatus)
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // Balance card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+                            .padding(16.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                "AVAILABLE BALANCE",
+                                fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                                letterSpacing = 1.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "MYR ${"%.2f".format(txManager?.localBalance ?: 500.0)}",
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    // Yellow accent strip
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .background(TngYellow, RoundedCornerShape(2.dp))
+                    )
+                }
+            }
 
-            when {
-                receipt != null -> ReceiptCard(receipt = receipt, isVendor = false)
-                errorMsg != null -> ErrorCard(errorMsg)
-                txState == TransactionState.CONFIRM_SENT -> {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Sending confirmation… waiting for receipt")
-                }
-                txState == TransactionState.ACK_RECEIVED && pendingAck != null -> {
-                    ConfirmPaymentCard(ack = pendingAck, onConfirm = onBiometricConfirm)
-                }
-                txState == TransactionState.REQUEST_SENT -> {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text("Waiting for vendor acknowledgement…")
-                }
-                btStatus == "Connected" && txState == TransactionState.CHANNEL_READY -> {
-                    Text("✓ Secure channel established", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    scannedQr?.let { Text("Vendor: ${it.merchantName}") }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = amountText, onValueChange = onAmountChange,
-                        label = { Text("Amount (MYR)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(onClick = onPay, modifier = Modifier.fillMaxWidth()) { Text("Send Payment Request") }
-                }
-                btStatus.startsWith("Connecting") || txState == TransactionState.HANDSHAKE_PENDING -> {
-                    CircularProgressIndicator()
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(btStatus)
-                }
-                scannedQr != null -> {
-                    QrScannedSection(
-                        qr = scannedQr,
-                        isScanning = isScanning,
-                        discoveredDevices = discoveredDevices,
-                        btAdapter = btAdapter,
-                        onStartDiscovery = onStartDiscovery,
-                        onDeviceSelected = onDeviceSelected
-                    )
-                }
-                else -> {
-                    Text("Step 1: Scan the vendor's QR code", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onScanQr, modifier = Modifier.fillMaxWidth()) {
-                        Text("Scan Vendor QR Code")
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                when {
+                    receipt != null -> ReceiptCard(receipt = receipt, isVendor = false)
+                    errorMsg != null -> ErrorCard(errorMsg)
+                    txState == TransactionState.CONFIRM_SENT -> {
+                        TngCard {
+                            CircularProgressIndicator(
+                                color = TngBlue,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Sending confirmation...\nWaiting for receipt",
+                                textAlign = TextAlign.Center,
+                                color = TngTextSecondary
+                            )
+                        }
+                    }
+                    txState == TransactionState.ACK_RECEIVED && pendingAck != null -> {
+                        ConfirmPaymentCard(ack = pendingAck, onConfirm = onBiometricConfirm)
+                    }
+                    txState == TransactionState.REQUEST_SENT -> {
+                        TngCard {
+                            CircularProgressIndicator(
+                                color = TngBlue,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                "Waiting for vendor acknowledgement...",
+                                textAlign = TextAlign.Center,
+                                color = TngTextSecondary
+                            )
+                        }
+                    }
+                    btStatus == "Connected" && txState == TransactionState.CHANNEL_READY -> {
+                        TngCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .background(TngSuccessLight, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("✓", color = TngSuccess, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    "Secure channel established",
+                                    color = TngSuccess,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            scannedQr?.let {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Vendor: ${it.merchantName}", color = TngTextSecondary)
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = amountText,
+                                onValueChange = onAmountChange,
+                                label = { Text("Amount (MYR)") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = TngBlue,
+                                    unfocusedBorderColor = TngBorder,
+                                    cursorColor = TngBlue,
+                                    focusedLabelColor = TngBlue
+                                )
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TngPrimaryButton(text = "Send Payment Request", onClick = onPay)
+                    }
+                    btStatus.startsWith("Connecting") || txState == TransactionState.HANDSHAKE_PENDING -> {
+                        TngCard {
+                            CircularProgressIndicator(
+                                color = TngBlue,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(btStatus, textAlign = TextAlign.Center, color = TngTextSecondary)
+                        }
+                    }
+                    scannedQr != null -> {
+                        QrScannedSection(
+                            qr = scannedQr,
+                            isScanning = isScanning,
+                            discoveredDevices = discoveredDevices,
+                            btAdapter = btAdapter,
+                            onStartDiscovery = onStartDiscovery,
+                            onDeviceSelected = onDeviceSelected
+                        )
+                    }
+                    else -> {
+                        TngCard {
+                            Text(
+                                "Step 1",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TngBlue,
+                                letterSpacing = 1.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Scan the vendor's QR code",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TngTextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Point your camera at the vendor's QR code to begin",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TngTextMuted
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TngPrimaryButton(text = "Scan Vendor QR Code", onClick = onScanQr)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
-                Text("Back to Role Selection")
+            // Bottom button
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                TngSecondaryButton(text = "Back to Role Selection", onClick = onReset)
             }
         }
     }
@@ -507,41 +868,150 @@ class MainActivity : FragmentActivity() {
         onStartDiscovery: () -> Unit,
         onDeviceSelected: (BluetoothDevice) -> Unit
     ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("✓ QR Scanned", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Text("Vendor: ${qr.merchantName}")
-                Text("ID: ${qr.vendorId}", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("Step 2: Connect to the vendor's device", style = MaterialTheme.typography.titleMedium)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Paired devices:", style = MaterialTheme.typography.labelLarge)
-        val paired = btAdapter.bondedDevices?.toList() ?: emptyList()
-        if (paired.isNotEmpty()) {
-            LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                items(paired) { device ->
-                    Text(
-                        text = "${device.name ?: "Unknown"} (${device.address})",
-                        modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
-                    )
+        // QR scanned status card
+        TngCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(TngSuccessLight, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("✓", color = TngSuccess, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("QR Scanned", fontWeight = FontWeight.Bold, color = TngSuccess)
+                    Text("Vendor: ${qr.merchantName}", color = TngTextSecondary, fontSize = 13.sp)
+                    Text("ID: ${qr.vendorId}", style = MaterialTheme.typography.bodySmall, color = TngTextMuted, fontFamily = FontFamily.Monospace)
                 }
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = onStartDiscovery, modifier = Modifier.fillMaxWidth()) {
-            Text(if (isScanning) "Scanning…" else "Search for Nearby Devices")
-        }
-        if (isScanning || discoveredDevices.isNotEmpty()) {
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Step 2 instruction
+        TngCard {
+            Text(
+                "Step 2",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TngBlue,
+                letterSpacing = 1.5.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Connect to the vendor's device",
+                style = MaterialTheme.typography.titleMedium,
+                color = TngTextPrimary
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Paired devices
+            Text(
+                "PAIRED DEVICES",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TngTextMuted,
+                letterSpacing = 1.sp
+            )
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Nearby:", style = MaterialTheme.typography.labelSmall)
-            LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                items(discoveredDevices) { device ->
-                    Text(
-                        text = "${device.name ?: "Unknown"} (${device.address})",
-                        modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
+            val paired = btAdapter.bondedDevices?.toList() ?: emptyList()
+            if (paired.isNotEmpty()) {
+                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
+                    items(paired) { device ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onDeviceSelected(device) }
+                                .background(TngBgSecondary, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(TngBlue, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("B", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    device.name ?: "Unknown",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TngTextPrimary,
+                                    fontSize = 14.sp
+                                )
+                                Text(device.address, fontSize = 11.sp, color = TngTextMuted, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
+            } else {
+                Text("No paired devices found", color = TngTextMuted, fontSize = 13.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        TngPrimaryButton(
+            text = if (isScanning) "Scanning..." else "Search for Nearby Devices",
+            onClick = onStartDiscovery
+        )
+
+        if (isScanning || discoveredDevices.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(12.dp))
+            TngCard {
+                Text(
+                    "NEARBY DEVICES",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TngTextMuted,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                if (isScanning && discoveredDevices.isEmpty()) {
+                    CircularProgressIndicator(
+                        color = TngBlue,
+                        modifier = Modifier.size(24.dp).align(Alignment.CenterHorizontally),
+                        strokeWidth = 2.dp
                     )
+                }
+                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
+                    items(discoveredDevices) { device ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onDeviceSelected(device) }
+                                .background(TngBgSecondary, RoundedCornerShape(12.dp))
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(TngBlueLight, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("B", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    device.name ?: "Unknown",
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TngTextPrimary,
+                                    fontSize = 14.sp
+                                )
+                                Text(device.address, fontSize = 11.sp, color = TngTextMuted, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
                 }
             }
         }
@@ -549,51 +1019,155 @@ class MainActivity : FragmentActivity() {
 
     @Composable
     fun ConfirmPaymentCard(ack: TxAck, onConfirm: () -> Unit) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Confirm Payment", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(ack.merchantName, fontSize = 18.sp)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("${ack.currency} ${"%.2f".format(ack.amount)}", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text("TX: ${ack.txId.take(8)}…", style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = onConfirm, modifier = Modifier.fillMaxWidth()) {
-                    Text("Authenticate & Pay")
-                }
-            }
+        TngCard {
+            // Yellow accent strip
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .background(TngYellow, RoundedCornerShape(2.dp))
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "CONFIRM PAYMENT",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TngTextMuted,
+                letterSpacing = 1.5.sp,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                ack.merchantName,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TngTextPrimary,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "${ack.currency} ${"%.2f".format(ack.amount)}",
+                fontSize = 38.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = TngTextPrimary,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "TX: ${ack.txId.take(8)}...",
+                style = MaterialTheme.typography.bodySmall,
+                color = TngTextMuted,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+            TngPrimaryButton(text = "Authenticate & Pay", onClick = onConfirm)
         }
     }
 
     @Composable
     fun ReceiptCard(receipt: TxReceipt, isVendor: Boolean) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (isVendor) "✓ Payment Received" else "✓ Payment Complete",
-                    fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(receipt.merchantName, fontSize = 16.sp)
-                Text("${receipt.currency} ${"%.2f".format(receipt.amount)}", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("TX: ${receipt.txId.take(16)}…", style = MaterialTheme.typography.bodySmall)
-                Text("At: ${receipt.completedAt}", style = MaterialTheme.typography.bodySmall)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Cryptographically signed & stored locally",
-                    style = MaterialTheme.typography.labelSmall,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.secondary)
+        TngCard {
+            // Success icon
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .background(TngSuccessLight, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("✓", fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = TngSuccess)
             }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                if (isVendor) "Payment Received" else "Payment Complete",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = TngSuccess,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            // Divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(TngDivider)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                receipt.merchantName,
+                fontSize = 16.sp,
+                color = TngTextPrimary,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "${receipt.currency} ${"%.2f".format(receipt.amount)}",
+                fontSize = 32.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = TngTextPrimary,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            // Divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(TngDivider)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "TX: ${receipt.txId.take(16)}...",
+                style = MaterialTheme.typography.bodySmall,
+                color = TngTextMuted,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "At: ${receipt.completedAt}",
+                style = MaterialTheme.typography.bodySmall,
+                color = TngTextMuted,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Cryptographically signed & stored locally",
+                style = MaterialTheme.typography.labelSmall,
+                textAlign = TextAlign.Center,
+                color = TngTextMuted,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            )
         }
     }
 
     @Composable
     fun ErrorCard(message: String) {
-        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text("Error", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
-                Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = TngErrorLight)
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(TngError, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text("Error", fontWeight = FontWeight.Bold, color = TngError, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(message, color = TngError.copy(alpha = 0.8f))
+                }
             }
         }
     }
@@ -601,22 +1175,88 @@ class MainActivity : FragmentActivity() {
     @Composable
     fun RoleSelectionScreen(onConsumer: () -> Unit, onVendor: () -> Unit) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
-            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(TngBlue, TngBlueDark),
+                        startY = 0f,
+                        endY = 600f
+                    )
+                ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("TNG Digital", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("Offline Transaction", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(48.dp))
-            Text("Select your role:", style = MaterialTheme.typography.labelLarge)
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onConsumer, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text("Consumer (Pay)", fontSize = 16.sp)
+            Spacer(modifier = Modifier.weight(0.3f))
+
+            // Logo area
+            Box(
+                modifier = Modifier
+                    .size(88.dp)
+                    .background(Color.White, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "TNG",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                    color = TngBlue
+                )
             }
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(onClick = onVendor, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text("Vendor (Receive)", fontSize = 16.sp)
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                "TNG Digital",
+                fontSize = 30.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Offline Transaction",
+                fontSize = 15.sp,
+                color = Color.White.copy(alpha = 0.7f)
+            )
+
+            Spacer(modifier = Modifier.weight(0.3f))
+
+            // Role selection card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "SELECT YOUR ROLE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TngTextMuted,
+                        letterSpacing = 1.5.sp
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    TngPrimaryButton(text = "Consumer (Pay)", onClick = onConsumer)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onVendor,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = TngBlue
+                        )
+                    ) {
+                        Text("Vendor (Receive)", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
+
+            Spacer(modifier = Modifier.weight(0.4f))
         }
     }
 }
