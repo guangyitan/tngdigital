@@ -1,5 +1,7 @@
 package com.example.tng_digital
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -31,6 +33,7 @@ class TransactionManager(
     private val isoFmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ", Locale.US)
 
     var sendRaw: ((String) -> Unit)? = null
+    var onConnectionClose: (() -> Unit)? = null
 
     private var state = TransactionState.IDLE
     private val seenTxIds = mutableSetOf<String>()
@@ -471,6 +474,7 @@ class TransactionManager(
         )
         setState(TransactionState.COMPLETED)
         onTransactionComplete(receipt)
+        Handler(Looper.getMainLooper()).postDelayed({ onConnectionClose?.invoke() }, 2000)
     }
 
     // ─── Consumer receives TX_RECEIPT ────────────────────────────────────────────
@@ -492,6 +496,7 @@ class TransactionManager(
         )
         setState(TransactionState.COMPLETED)
         onTransactionComplete(receipt)
+        Handler(Looper.getMainLooper()).postDelayed({ onConnectionClose?.invoke() }, 2000)
     }
 
     // ─── QR Payload helpers ──────────────────────────────────────────────────────

@@ -173,6 +173,7 @@ class MainActivity : FragmentActivity() {
                     onVendorRequestReceived = { vendorIncomingRequest = it }
                 ).also { mgr ->
                     mgr.sendRaw = { msg -> btService.sendMessage(msg) }
+                    mgr.onConnectionClose = { btService.stop() }
                     btService.onMessageReceived = { msg -> mgr.handleReceivedMessage(msg) }
                     btService.onStatusChanged = { status ->
                         btStatus = status
