@@ -22,10 +22,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import kotlinx.coroutines.delay
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,34 +45,22 @@ class MainActivity : FragmentActivity() {
     private val bluetoothManager by lazy { getSystemService(BluetoothManager::class.java) }
     private val bluetoothAdapter: BluetoothAdapter? by lazy { bluetoothManager?.adapter }
 
-    private val discoveredDevices = mutableStateListOf<BluetoothDevice>()
     private var onPairingSuccess: (() -> Unit)? = null
     private var onQrScanned: ((String) -> Unit)? = null
 
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
         override fun onReceive(context: Context, intent: Intent) {
-            when (intent.action) {
-                BluetoothDevice.ACTION_FOUND -> {
-                    val device: BluetoothDevice? =
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                    device?.let { if (discoveredDevices.none { d -> d.address == it.address }) discoveredDevices.add(it) }
+            if (intent.action == BluetoothDevice.ACTION_BOND_STATE_CHANGED) {
+                val device: BluetoothDevice? =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                if (device != null && bondState == BluetoothDevice.BOND_BONDED) {
+                    Toast.makeText(context, "Paired with ${device.name ?: device.address}", Toast.LENGTH_SHORT).show()
+                    onPairingSuccess?.invoke()
                 }
-                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
-                    val device: BluetoothDevice? =
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                    val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
-                    if (device != null && bondState == BluetoothDevice.BOND_BONDED) {
-                        Toast.makeText(context, "Paired with ${device.name ?: device.address}", Toast.LENGTH_SHORT).show()
-                        onPairingSuccess?.invoke()
-                    }
-                }
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED ->
-                    Toast.makeText(context, "Discovery finished", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -89,10 +75,7 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         checkPermissions()
-        val filter = IntentFilter(BluetoothDevice.ACTION_FOUND).apply {
-            addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
-            addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-        }
+        val filter = IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
         registerReceiver(receiver, filter)
         setContent {
             TngdigitalTheme {
@@ -174,8 +157,8 @@ class MainActivity : FragmentActivity() {
         var scannedQr by remember { mutableStateOf<QrPayload?>(null) }
         var amountText by remember { mutableStateOf("") }
         var vendorIncomingRequest by remember { mutableStateOf<TxRequest?>(null) }
-        var isScanning by remember { mutableStateOf(false) }
         var isBleScanning by remember { mutableStateOf(false) }
+        var bannerMsg by remember { mutableStateOf<String?>(null) }
 
         val btService = remember { BluetoothService(adapter) }
         val txManager = remember(appRole) {
@@ -198,12 +181,39 @@ class MainActivity : FragmentActivity() {
             }
         }
 
+        LaunchedEffect(btStatus) {
+            val isConnFail = btStatus == "Connection failed" || btStatus.startsWith("BLE scan failed")
+            val isUnexpectedDisconnect = btStatus == "Disconnected" &&
+                txState != TransactionState.IDLE && txState != TransactionState.COMPLETED
+            if ((isConnFail || isUnexpectedDisconnect) && appRole != null) {
+                val msg = if (isConnFail) "Connection failed. Please try again." else "Connection lost. Please try again."
+                btService.stopBleScan()
+                btService.stop()
+                txManager?.reset()
+                scannedQr = null
+                pendingAck = null
+                completedReceipt = null
+                errorMsg = null
+                amountText = ""
+                isBleScanning = false
+                vendorIncomingRequest = null
+                appRole = null
+                bannerMsg = msg
+            }
+        }
+
+        LaunchedEffect(bannerMsg) {
+            if (bannerMsg != null) {
+                delay(4000)
+                bannerMsg = null
+            }
+        }
+
         when {
             appRole == null -> RoleSelectionScreen(
                 onConsumer = { appRole = AppRole.CONSUMER },
-                onVendor = {
-                    appRole = AppRole.VENDOR
-                }
+                onVendor = { appRole = AppRole.VENDOR },
+                bannerMsg = bannerMsg
             )
             appRole == AppRole.VENDOR -> VendorScreen(
                 txManager = txManager,
@@ -230,7 +240,6 @@ class MainActivity : FragmentActivity() {
             )
             appRole == AppRole.CONSUMER -> ConsumerScreen(
                 txManager = txManager,
-                btAdapter = adapter,
                 btStatus = btStatus,
                 txState = txState,
                 scannedQr = scannedQr,
@@ -239,9 +248,7 @@ class MainActivity : FragmentActivity() {
                 errorMsg = errorMsg,
                 amountText = amountText,
                 onAmountChange = { amountText = it },
-                isScanning = isScanning,
                 isBleScanning = isBleScanning,
-                discoveredDevices = discoveredDevices,
                 onScanQr = {
                     onQrScanned = { content ->
                         val mgr = txManager
@@ -266,24 +273,6 @@ class MainActivity : FragmentActivity() {
                     }
                     launchQrScanner()
                 },
-                onStartDiscovery = {
-                    discoveredDevices.clear()
-                    if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-                        || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-                        adapter.startDiscovery()
-                        isScanning = true
-                    }
-                },
-                onDeviceSelected = { device ->
-                    adapter.cancelDiscovery()
-                    isScanning = false
-                    if (device.bondState == BluetoothDevice.BOND_NONE) {
-                        onPairingSuccess = { btService.connectToDevice(device) }
-                        @SuppressLint("MissingPermission") device.createBond()
-                    } else {
-                        btService.connectToDevice(device)
-                    }
-                },
                 onPay = {
                     val amt = amountText.toDoubleOrNull()
                     if (amt == null || amt <= 0) { errorMsg = "Enter a valid amount" }
@@ -299,9 +288,7 @@ class MainActivity : FragmentActivity() {
                     completedReceipt = null
                     errorMsg = null
                     amountText = ""
-                    isScanning = false
                     isBleScanning = false
-                    discoveredDevices.clear()
                     appRole = null
                 }
             )
@@ -439,7 +426,6 @@ class MainActivity : FragmentActivity() {
     @Composable
     fun ConsumerScreen(
         txManager: TransactionManager?,
-        btAdapter: BluetoothAdapter,
         btStatus: String,
         txState: TransactionState,
         scannedQr: QrPayload?,
@@ -448,12 +434,8 @@ class MainActivity : FragmentActivity() {
         errorMsg: String?,
         amountText: String,
         onAmountChange: (String) -> Unit,
-        isScanning: Boolean,
         isBleScanning: Boolean,
-        discoveredDevices: List<BluetoothDevice>,
         onScanQr: () -> Unit,
-        onStartDiscovery: () -> Unit,
-        onDeviceSelected: (BluetoothDevice) -> Unit,
         onPay: () -> Unit,
         onBiometricConfirm: () -> Unit,
         onReset: () -> Unit
@@ -504,15 +486,19 @@ class MainActivity : FragmentActivity() {
                     Text(btStatus)
                 }
                 scannedQr != null -> {
-                    QrScannedSection(
-                        qr = scannedQr,
-                        isScanning = isScanning,
-                        isBleScanning = isBleScanning,
-                        discoveredDevices = discoveredDevices,
-                        btAdapter = btAdapter,
-                        onStartDiscovery = onStartDiscovery,
-                        onDeviceSelected = onDeviceSelected
-                    )
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("✓ QR Scanned", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text("Vendor: ${scannedQr.merchantName}")
+                            Text("ID: ${scannedQr.vendorId}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Locating vendor device via BLE…", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Will connect automatically once found.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                 }
                 else -> {
                     Text("Step 1: Scan the vendor's QR code", style = MaterialTheme.typography.titleMedium)
@@ -526,65 +512,6 @@ class MainActivity : FragmentActivity() {
             Spacer(modifier = Modifier.weight(1f))
             OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
                 Text("Back to Role Selection")
-            }
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    @Composable
-    fun QrScannedSection(
-        qr: QrPayload,
-        isScanning: Boolean,
-        isBleScanning: Boolean,
-        discoveredDevices: List<BluetoothDevice>,
-        btAdapter: BluetoothAdapter,
-        onStartDiscovery: () -> Unit,
-        onDeviceSelected: (BluetoothDevice) -> Unit
-    ) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text("✓ QR Scanned", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Text("Vendor: ${qr.merchantName}")
-                Text("ID: ${qr.vendorId}", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        if (isBleScanning) {
-            CircularProgressIndicator()
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Locating vendor device via BLE…", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("Will connect automatically once found.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-        } else {
-            Text("Step 2: Connect to the vendor's device", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Paired devices:", style = MaterialTheme.typography.labelLarge)
-            val paired = btAdapter.bondedDevices?.toList() ?: emptyList()
-            if (paired.isNotEmpty()) {
-                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                    items(paired) { device ->
-                        Text(
-                            text = "${device.name ?: "Unknown"} (${device.address})",
-                            modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(onClick = onStartDiscovery, modifier = Modifier.fillMaxWidth()) {
-                Text(if (isScanning) "Scanning…" else "Search for Nearby Devices")
-            }
-            if (isScanning || discoveredDevices.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("Nearby:", style = MaterialTheme.typography.labelSmall)
-                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                    items(discoveredDevices) { device ->
-                        Text(
-                            text = "${device.name ?: "Unknown"} (${device.address})",
-                            modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
-                        )
-                    }
-                }
             }
         }
     }
@@ -641,23 +568,42 @@ class MainActivity : FragmentActivity() {
     }
 
     @Composable
-    fun RoleSelectionScreen(onConsumer: () -> Unit, onVendor: () -> Unit) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text("TNG Digital", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            Text("Offline Transaction", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(48.dp))
-            Text("Select your role:", style = MaterialTheme.typography.labelLarge)
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onConsumer, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text("Consumer (Pay)", fontSize = 16.sp)
+    fun RoleSelectionScreen(onConsumer: () -> Unit, onVendor: () -> Unit, bannerMsg: String? = null) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(32.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("TNG Digital", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                Text("Offline Transaction", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(48.dp))
+                Text("Select your role:", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(onClick = onConsumer, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                    Text("Consumer (Pay)", fontSize = 16.sp)
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(onClick = onVendor, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                    Text("Vendor (Receive)", fontSize = 16.sp)
+                }
             }
-            Spacer(modifier = Modifier.height(12.dp))
-            Button(onClick = onVendor, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text("Vendor (Receive)", fontSize = 16.sp)
+            bannerMsg?.let { msg ->
+                Card(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                ) {
+                    Text(
+                        msg,
+                        modifier = Modifier.padding(16.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
     }
