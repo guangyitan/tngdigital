@@ -10,7 +10,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -18,7 +17,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -27,12 +25,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import com.example.tng_digital.ui.theme.TngdigitalTheme
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
 
 class MainActivity : ComponentActivity() {
 
@@ -42,6 +37,9 @@ class MainActivity : ComponentActivity() {
     private var bluetoothService: BluetoothService? = null
 
     private val discoveredDevices = mutableStateListOf<BluetoothDevice>()
+
+    // Global state to handle navigation from BroadcastReceiver
+    private var onPairingSuccess: (() -> Unit)? = null
 
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
@@ -70,6 +68,7 @@ class MainActivity : ComponentActivity() {
                     val bondState = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
                     if (device != null && bondState == BluetoothDevice.BOND_BONDED) {
                         Toast.makeText(context, "Paired with ${device.name ?: device.address}", Toast.LENGTH_SHORT).show()
+                        onPairingSuccess?.invoke()
                         bluetoothService?.connectToDevice(device)
                     }
                 }
@@ -77,45 +76,6 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(context, "Discovery Finished", Toast.LENGTH_SHORT).show()
                 }
             }
-        }
-    }
-
-    private val barcodeLauncher = registerForActivityResult(ScanContract()) { result ->
-        val scannedContent = result.contents
-        android.util.Log.d("MainActivity", "Scan result received: $scannedContent")
-        
-        if (scannedContent == null) {
-            Toast.makeText(this, "Scan cancelled", Toast.LENGTH_SHORT).show()
-            return@registerForActivityResult
-        }
-
-        Toast.makeText(this, "Scanned: $scannedContent", Toast.LENGTH_LONG).show()
-
-        try {
-            if (BluetoothAdapter.checkBluetoothAddress(scannedContent)) {
-                android.util.Log.d("MainActivity", "Valid Bluetooth address found: $scannedContent")
-                val adapter = bluetoothAdapter
-                if (adapter == null) {
-                    android.util.Log.e("MainActivity", "BluetoothAdapter is null")
-                    Toast.makeText(this, "Bluetooth not available", Toast.LENGTH_SHORT).show()
-                    return@registerForActivityResult
-                }
-                
-                val device = adapter.getRemoteDevice(scannedContent)
-                if (device != null) {
-                    android.util.Log.d("MainActivity", "Connecting to device: ${device.address}")
-                    bluetoothService?.connectToDevice(device)
-                } else {
-                    android.util.Log.e("MainActivity", "getRemoteDevice returned null")
-                    Toast.makeText(this, "Device not found", Toast.LENGTH_SHORT).show()
-                }
-            } else {
-                android.util.Log.e("MainActivity", "Invalid Bluetooth address: $scannedContent")
-                Toast.makeText(this, "Invalid device address in QR: $scannedContent", Toast.LENGTH_LONG).show()
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "Error processing scan result", e)
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -166,7 +126,6 @@ class MainActivity : ComponentActivity() {
         } else {
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
         }
-        permissions.add(Manifest.permission.CAMERA)
         
         if (permissions.any { ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }) {
             requestPermissionLauncher.launch(permissions.toTypedArray())
@@ -183,42 +142,40 @@ class MainActivity : ComponentActivity() {
         var status by remember { mutableStateOf("Disconnected") }
         var messages by remember { mutableStateOf(listOf<String>()) }
         var role by remember { mutableStateOf<String?>(null) } // "Sender" or "Receiver"
-        var showQRCode by remember { mutableStateOf(false) }
-        var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
         var isScanning by remember { mutableStateOf(false) }
+        var isConnecting by remember { mutableStateOf(false) }
 
         val service = remember {
             BluetoothService(
                 adapter = adapter,
                 onMessageReceived = { msg -> messages = messages + "Received: $msg" },
-                onStatusChanged = { newStatus -> status = newStatus }
+                onStatusChanged = { newStatus -> 
+                    status = newStatus
+                    if (newStatus == "Connected" || newStatus == "Connection failed") {
+                        isConnecting = false
+                    }
+                }
             ).also { bluetoothService = it }
         }
 
-        if (showQRCode && qrBitmap != null) {
-            AlertDialog(
-                onDismissRequest = { showQRCode = false },
-                title = { Text("Scanner to Connect") },
-                text = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Image(
-                            bitmap = qrBitmap!!.asImageBitmap(),
-                            contentDescription = "Connection QR",
-                            modifier = Modifier.size(250.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Ask the Sender to scan this QR code", style = MaterialTheme.typography.bodySmall)
-                    }
-                },
-                confirmButton = {
-                    Button(onClick = { showQRCode = false }) {
-                        Text("Close")
-                    }
-                }
-            )
+        // Handle navigation after successful pairing
+        onPairingSuccess = {
+            role = "Receiver"
+            service.startServer()
+            isConnecting = true
         }
 
         Column(modifier = Modifier.padding(16.dp)) {
+            if (isConnecting) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Connecting...")
+                    }
+                }
+            }
+
             Text(text = "Status: $status", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -229,29 +186,6 @@ class MainActivity : ComponentActivity() {
                         if (selectedRole == "Receiver") {
                             service.startServer()
                         }
-                    },
-                    onScanQR = {
-                        val options = ScanOptions()
-                        options.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                        options.setPrompt("Scan Receiver QR Code")
-                        options.setCameraId(0)
-                        options.setBeepEnabled(false)
-                        barcodeLauncher.launch(options)
-                    },
-                    onShowQR = {
-                        val address = if (ActivityCompat.checkSelfPermission(
-                                this@MainActivity,
-                                Manifest.permission.BLUETOOTH_CONNECT
-                            ) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S
-                        ) {
-                            adapter.bondedDevices.firstOrNull()?.address ?: "00:00:00:00:00:00"
-                        } else {
-                            "00:00:00:00:00:00"
-                        }
-                        android.util.Log.d("MainActivity", "Generated QR content: $address")
-                        Toast.makeText(this@MainActivity, "QR Content: $address", Toast.LENGTH_LONG).show()
-                        qrBitmap = QRCodeUtils.generateQRCode(address)
-                        showQRCode = true
                     },
                     onDiscoverable = {
                         val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
@@ -285,14 +219,16 @@ class MainActivity : ComponentActivity() {
                                         Log.d("MainActivity", "Device selected: $deviceName (${device.address})")
                                         adapter.cancelDiscovery()
                                         isScanning = false
-                                        role = "Sender"
                                         
                                         if (device.bondState == BluetoothDevice.BOND_NONE) {
                                             Log.d("MainActivity", "Device not paired. Creating bond...")
                                             device.createBond()
+                                            // Don't set role yet, wait for bond success via onPairingSuccess
                                         } else {
                                             Log.d("MainActivity", "Device already paired. Connecting...")
-                                            service.connectToDevice(device) 
+                                            role = "Receiver"
+                                            isConnecting = true
+                                            service.startServer()
                                         }
                                     }
                                     .padding(8.dp)
@@ -332,8 +268,6 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun RoleSelection(
         onRoleSelected: (String) -> Unit, 
-        onScanQR: () -> Unit, 
-        onShowQR: () -> Unit,
         onDiscoverable: () -> Unit,
         onStartDiscovery: () -> Unit
     ) {
@@ -351,35 +285,31 @@ class MainActivity : ComponentActivity() {
             Button(onClick = onStartDiscovery, modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)) { 
                 Text("Search for Devices (Sender)") 
             }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider()
-            Spacer(modifier = Modifier.height(8.dp))
-
-            OutlinedButton(onClick = onShowQR, modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)) { 
-                Text("Show QR Code") 
-            }
-            OutlinedButton(onClick = onScanQR, modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp)) { 
-                Text("Scan QR to Connect") 
-            }
         }
     }
 
     @SuppressLint("MissingPermission")
     @Composable
     fun DeviceList(adapter: BluetoothAdapter, onDeviceSelected: (BluetoothDevice) -> Unit) {
+        // Using remember(adapter.bondedDevices) doesn't work as expected because bondedDevices is a Set,
+        // but its reference might not change. However, when returning to this screen (role == null -> Sender),
+        // DeviceList is recomposed and bondedDevices is re-read.
         val pairedDevices = adapter.bondedDevices.toList()
         
-        Text("Select a paired device to connect:")
-        LazyColumn {
-            items(pairedDevices) { device ->
-                Text(
-                    text = "${device.name ?: "Unknown"} (${device.address})",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onDeviceSelected(device) }
-                        .padding(8.dp)
-                )
+        if (pairedDevices.isEmpty()) {
+            Text("No paired devices found. Please search and pair first.")
+        } else {
+            Text("Select a paired device to connect:")
+            LazyColumn {
+                items(pairedDevices) { device ->
+                    Text(
+                        text = "${device.name ?: "Unknown"} (${device.address})",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onDeviceSelected(device) }
+                            .padding(8.dp)
+                    )
+                }
             }
         }
     }
