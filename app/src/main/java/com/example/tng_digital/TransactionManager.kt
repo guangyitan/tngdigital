@@ -357,6 +357,8 @@ class TransactionManager(
             merchantName = merchantName, amount = amount, currency = req.currency,
             completedAt = completedAt, vendorSignature = receiptSig, consumerSignatureRef = consumerSig
         )
+        // Queue for server sync (vendor side)
+        queueForSync(receipt, "merchant")
         setState(TransactionState.COMPLETED)
         onTransactionComplete(receipt)
     }
@@ -378,6 +380,8 @@ class TransactionManager(
             vendorSignature = inner.getString("vendor_signature"),
             consumerSignatureRef = inner.getString("consumer_signature_ref")
         )
+        // Queue for server sync (consumer side)
+        queueForSync(receipt, "user")
         setState(TransactionState.COMPLETED)
         onTransactionComplete(receipt)
     }
@@ -438,6 +442,22 @@ class TransactionManager(
     private fun setState(newState: TransactionState) {
         state = newState
         onStateChanged(newState)
+    }
+
+    // ─── Sync Queue Integration ──────────────────────────────────────────────
+
+    private fun queueForSync(receipt: TxReceipt, side: String) {
+        val serverTx = ServerTransaction(
+            id = receipt.txId,
+            amount = receipt.amount,
+            currency = receipt.currency,
+            timestamp = System.currentTimeMillis(),
+            fromUserId = receipt.consumerId,
+            toMerchantId = receipt.vendorId,
+            status = "completed",
+            syncStatus = "pending_sync"
+        )
+        SyncQueue.addToQueue(receipt.txId, side, serverTx)
     }
 
     fun reset() {

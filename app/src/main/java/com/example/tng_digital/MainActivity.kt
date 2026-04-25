@@ -49,6 +49,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.tng_digital.ui.theme.*
 import com.google.zxing.integration.android.IntentIntegrator
+import kotlinx.coroutines.launch
 
 class MainActivity : FragmentActivity() {
 
@@ -212,6 +213,14 @@ class MainActivity : FragmentActivity() {
         var vendorIncomingRequest by remember { mutableStateOf<TxRequest?>(null) }
         var isScanning by remember { mutableStateOf(false) }
 
+        // API / Sync state
+        var sessionInitialized by remember { mutableStateOf(false) }
+        var sessionDisplayName by remember { mutableStateOf("") }
+        var isPushing by remember { mutableStateOf(false) }
+        var isPulling by remember { mutableStateOf(false) }
+        var syncMessage by remember { mutableStateOf<String?>(null) }
+        val coroutineScope = rememberCoroutineScope()
+
         val btService = remember { BluetoothService(adapter) }
         val txManager = remember(appRole) {
             appRole?.let { role ->
@@ -235,6 +244,70 @@ class MainActivity : FragmentActivity() {
 
         onPairingSuccess = {
             btService.startServer()
+        }
+
+        // Session init on role selection
+        LaunchedEffect(appRole) {
+            if (appRole != null && !sessionInitialized) {
+                try {
+                    val role = if (appRole == AppRole.CONSUMER) "user" else "merchant"
+                    val deviceId = txManager?.deviceId ?: "unknown"
+                    val response = ApiClient.initSession(SessionInitRequest(deviceId = deviceId, role = role))
+                    sessionDisplayName = response.merchantName ?: response.displayName
+                    if (appRole == AppRole.CONSUMER) {
+                        txManager?.localBalance = response.offlineBalance
+                    }
+                    sessionInitialized = true
+                    syncMessage = "Session initialized: $sessionDisplayName"
+                } catch (e: Exception) {
+                    // Offline — use local values silently
+                    sessionInitialized = true
+                }
+            }
+        }
+
+        // Sync handlers
+        val onPush: () -> Unit = {
+            coroutineScope.launch {
+                isPushing = true
+                syncMessage = null
+                try {
+                    val side = if (appRole == AppRole.CONSUMER) "user" else "merchant"
+                    val deviceId = txManager?.deviceId ?: "unknown"
+                    val queue = SyncQueue.getQueue(side)
+                    if (queue.isEmpty()) {
+                        syncMessage = "Nothing to push. No pending transactions."
+                    } else {
+                        val res = ApiClient.pushTransactions(SyncRequest(deviceId = deviceId, transactions = queue))
+                        SyncQueue.markSynced(res.syncedTxIds)
+                        syncMessage = "${res.syncedTxIds.size} transaction(s) pushed to server."
+                    }
+                } catch (e: Exception) {
+                    syncMessage = "Push failed. Could not reach server."
+                } finally {
+                    isPushing = false
+                }
+            }
+        }
+
+        val onPull: () -> Unit = {
+            coroutineScope.launch {
+                isPulling = true
+                syncMessage = null
+                try {
+                    val role = if (appRole == AppRole.CONSUMER) "user" else "merchant"
+                    val deviceId = txManager?.deviceId ?: "unknown"
+                    val res = ApiClient.pullAccount(PullRequest(deviceId = deviceId, role = role))
+                    if (appRole == AppRole.CONSUMER) {
+                        txManager?.localBalance = res.offlineBalance
+                    }
+                    syncMessage = "Updated. Balance: MYR ${"%.2f".format(res.offlineBalance)}, ${res.transactions.size} tx(s) synced."
+                } catch (e: Exception) {
+                    syncMessage = "Pull failed. Could not reach server."
+                } finally {
+                    isPulling = false
+                }
+            }
         }
 
         when {
@@ -263,8 +336,16 @@ class MainActivity : FragmentActivity() {
                     vendorIncomingRequest = null
                     completedReceipt = null
                     errorMsg = null
+                    sessionInitialized = false
+                    syncMessage = null
                     appRole = null
-                }
+                },
+                isPushing = isPushing,
+                isPulling = isPulling,
+                syncMessage = syncMessage,
+                onPush = onPush,
+                onPull = onPull,
+                onDismissSync = { syncMessage = null }
             )
             appRole == AppRole.CONSUMER -> ConsumerScreen(
                 txManager = txManager,
@@ -321,8 +402,16 @@ class MainActivity : FragmentActivity() {
                     amountText = ""
                     isScanning = false
                     discoveredDevices.clear()
+                    sessionInitialized = false
+                    syncMessage = null
                     appRole = null
-                }
+                },
+                isPushing = isPushing,
+                isPulling = isPulling,
+                syncMessage = syncMessage,
+                onPush = onPush,
+                onPull = onPull,
+                onDismissSync = { syncMessage = null }
             )
         }
     }
@@ -469,6 +558,102 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    // ─── Sync Section ─────────────────────────────────────────────────────────────
+
+    @Composable
+    fun SyncSection(
+        side: String,
+        isPushing: Boolean,
+        isPulling: Boolean,
+        syncMessage: String?,
+        onPush: () -> Unit,
+        onPull: () -> Unit,
+        onDismissSync: () -> Unit
+    ) {
+        val pendingCount = SyncQueue.pendingCount(side)
+
+        // Sync message banner
+        if (syncMessage != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = TngBlue.copy(alpha = 0.1f))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        syncMessage,
+                        modifier = Modifier.weight(1f),
+                        fontSize = 13.sp,
+                        color = TngBlue
+                    )
+                    Text(
+                        "x",
+                        modifier = Modifier
+                            .clickable { onDismissSync() }
+                            .padding(4.dp),
+                        color = TngBlue,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Push / Pull buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(
+                onClick = onPush,
+                enabled = !isPushing && !isPulling,
+                modifier = Modifier.weight(1f).height(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TngBlue,
+                    contentColor = Color.White
+                )
+            ) {
+                if (isPushing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        "Push${if (pendingCount > 0) " ($pendingCount)" else ""}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            Button(
+                onClick = onPull,
+                enabled = !isPushing && !isPulling,
+                modifier = Modifier.weight(1f).height(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TngBlueLight,
+                    contentColor = Color.White
+                )
+            ) {
+                if (isPulling) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Pull", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+
     // ─── Vendor Screen ────────────────────────────────────────────────────────────
 
     @Composable
@@ -480,7 +665,13 @@ class MainActivity : FragmentActivity() {
         receipt: TxReceipt?,
         errorMsg: String?,
         onMakeDiscoverable: () -> Unit,
-        onReset: () -> Unit
+        onReset: () -> Unit,
+        isPushing: Boolean = false,
+        isPulling: Boolean = false,
+        syncMessage: String? = null,
+        onPush: () -> Unit = {},
+        onPull: () -> Unit = {},
+        onDismissSync: () -> Unit = {}
     ) {
         val qrBitmap = remember(txManager) {
             txManager?.generateVendorQrPayload()?.let { payload ->
@@ -631,8 +822,18 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            // Bottom button
+            // Sync section + bottom buttons
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                SyncSection(
+                    side = "merchant",
+                    isPushing = isPushing,
+                    isPulling = isPulling,
+                    syncMessage = syncMessage,
+                    onPush = onPush,
+                    onPull = onPull,
+                    onDismissSync = onDismissSync
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 TngSecondaryButton(text = "Back to Role Selection", onClick = onReset)
             }
         }
@@ -659,7 +860,13 @@ class MainActivity : FragmentActivity() {
         onDeviceSelected: (BluetoothDevice) -> Unit,
         onPay: () -> Unit,
         onBiometricConfirm: () -> Unit,
-        onReset: () -> Unit
+        onReset: () -> Unit,
+        isPushing: Boolean = false,
+        isPulling: Boolean = false,
+        syncMessage: String? = null,
+        onPush: () -> Unit = {},
+        onPull: () -> Unit = {},
+        onDismissSync: () -> Unit = {}
     ) {
         Column(
             modifier = Modifier
@@ -793,10 +1000,13 @@ class MainActivity : FragmentActivity() {
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TngTextPrimary,
+                                    unfocusedTextColor = TngTextPrimary,
                                     focusedBorderColor = TngBlue,
                                     unfocusedBorderColor = TngBorder,
                                     cursorColor = TngBlue,
-                                    focusedLabelColor = TngBlue
+                                    focusedLabelColor = TngBlue,
+                                    unfocusedLabelColor = TngTextSecondary
                                 )
                             )
                         }
@@ -851,8 +1061,18 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            // Bottom button
+            // Sync section + bottom buttons
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                SyncSection(
+                    side = "user",
+                    isPushing = isPushing,
+                    isPulling = isPulling,
+                    syncMessage = syncMessage,
+                    onPush = onPush,
+                    onPull = onPull,
+                    onDismissSync = onDismissSync
+                )
+                Spacer(modifier = Modifier.height(8.dp))
                 TngSecondaryButton(text = "Back to Role Selection", onClick = onReset)
             }
         }
