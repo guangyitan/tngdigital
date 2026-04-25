@@ -16,7 +16,6 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
@@ -39,8 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.tng_digital.ui.theme.TngdigitalTheme
-import com.journeyapps.barcodescanner.ScanContract
-import com.journeyapps.barcodescanner.ScanOptions
+import com.google.zxing.integration.android.IntentIntegrator
 
 class MainActivity : ComponentActivity() {
 
@@ -49,6 +47,7 @@ class MainActivity : ComponentActivity() {
 
     private val discoveredDevices = mutableStateListOf<BluetoothDevice>()
     private var onPairingSuccess: (() -> Unit)? = null
+    private var onQrScanned: ((String) -> Unit)? = null
 
     private val receiver = object : BroadcastReceiver() {
         @SuppressLint("MissingPermission")
@@ -100,6 +99,23 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        val result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
+        if (result != null) {
+            result.contents?.let { onQrScanned?.invoke(it) }
+        } else {
+            super.onActivityResult(requestCode, resultCode, data)
+        }
+    }
+
+    private fun launchQrScanner() {
+        IntentIntegrator(this).apply {
+            setBeepEnabled(true)
+            setOrientationLocked(false)
+        }.initiateScan()
     }
 
     override fun onDestroy() {
@@ -164,12 +180,6 @@ class MainActivity : ComponentActivity() {
             btService.startServer()
         }
 
-        val qrScanLauncher = rememberQrScanLauncher { content ->
-            txManager?.parseQrPayload(content)?.let { payload ->
-                scannedQr = payload
-            } ?: run { errorMsg = "Invalid QR code" }
-        }
-
         when {
             appRole == null -> RoleSelectionScreen(
                 onConsumer = { appRole = AppRole.CONSUMER },
@@ -212,7 +222,14 @@ class MainActivity : ComponentActivity() {
                 onAmountChange = { amountText = it },
                 isScanning = isScanning,
                 discoveredDevices = discoveredDevices,
-                onScanQr = { qrScanLauncher.launch(ScanOptions().apply { setBeepEnabled(true) }) },
+                onScanQr = {
+                    onQrScanned = { content ->
+                        txManager?.parseQrPayload(content)?.let { payload ->
+                            scannedQr = payload
+                        } ?: run { errorMsg = "Invalid QR code" }
+                    }
+                    launchQrScanner()
+                },
                 onStartDiscovery = {
                     discoveredDevices.clear()
                     if (ActivityCompat.checkSelfPermission(this@MainActivity, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
@@ -286,14 +303,6 @@ class MainActivity : ComponentActivity() {
             .build()
         prompt.authenticate(info)
     }
-
-    // ─── QR Scan launcher ────────────────────────────────────────────────────────
-
-    @Composable
-    fun rememberQrScanLauncher(onResult: (String) -> Unit) =
-        rememberLauncherForActivityResult(ScanContract()) { result ->
-            result.contents?.let { onResult(it) }
-        }
 
     // ─── Vendor Screen ────────────────────────────────────────────────────────────
 
