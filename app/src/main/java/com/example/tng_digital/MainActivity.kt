@@ -50,6 +50,9 @@ import androidx.core.content.ContextCompat
 import com.example.tng_digital.ui.theme.*
 import com.google.zxing.integration.android.IntentIntegrator
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : FragmentActivity() {
 
@@ -212,6 +215,7 @@ class MainActivity : FragmentActivity() {
         var amountText by remember { mutableStateOf("") }
         var vendorIncomingRequest by remember { mutableStateOf<TxRequest?>(null) }
         var isScanning by remember { mutableStateOf(false) }
+        var showHistory by remember { mutableStateOf(false) }
 
         // API / Sync state
         var sessionInitialized by remember { mutableStateOf(false) }
@@ -317,6 +321,16 @@ class MainActivity : FragmentActivity() {
                     appRole = AppRole.VENDOR
                 }
             )
+            showHistory -> TransactionHistoryScreen(
+                side = if (appRole == AppRole.CONSUMER) "user" else "merchant",
+                isPushing = isPushing,
+                isPulling = isPulling,
+                syncMessage = syncMessage,
+                onPush = onPush,
+                onPull = onPull,
+                onDismissSync = { syncMessage = null },
+                onBack = { showHistory = false }
+            )
             appRole == AppRole.VENDOR -> VendorScreen(
                 txManager = txManager,
                 btStatus = btStatus,
@@ -340,12 +354,7 @@ class MainActivity : FragmentActivity() {
                     syncMessage = null
                     appRole = null
                 },
-                isPushing = isPushing,
-                isPulling = isPulling,
-                syncMessage = syncMessage,
-                onPush = onPush,
-                onPull = onPull,
-                onDismissSync = { syncMessage = null }
+                onShowHistory = { showHistory = true }
             )
             appRole == AppRole.CONSUMER -> ConsumerScreen(
                 txManager = txManager,
@@ -406,12 +415,7 @@ class MainActivity : FragmentActivity() {
                     syncMessage = null
                     appRole = null
                 },
-                isPushing = isPushing,
-                isPulling = isPulling,
-                syncMessage = syncMessage,
-                onPush = onPush,
-                onPull = onPull,
-                onDismissSync = { syncMessage = null }
+                onShowHistory = { showHistory = true }
             )
         }
     }
@@ -558,6 +562,160 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    // ─── Transaction History Screen ─────────────────────────────────────────────
+
+    @Composable
+    fun TransactionHistoryScreen(
+        side: String,
+        isPushing: Boolean,
+        isPulling: Boolean,
+        syncMessage: String?,
+        onPush: () -> Unit,
+        onPull: () -> Unit,
+        onDismissSync: () -> Unit,
+        onBack: () -> Unit
+    ) {
+        val transactions = remember { SyncQueue.getQueue(side) }
+        val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()) }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(TngBgSecondary)
+        ) {
+            // Blue gradient header
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(listOf(TngBlue, TngBlueDark))
+                    )
+                    .padding(top = 48.dp, bottom = 24.dp, start = 20.dp, end = 20.dp)
+            ) {
+                Column {
+                    Text(
+                        "< Back",
+                        color = Color.White.copy(alpha = 0.8f),
+                        fontSize = 14.sp,
+                        modifier = Modifier.clickable { onBack() }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Transaction History",
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "${transactions.size} pending transaction(s)",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 14.sp
+                    )
+                }
+            }
+
+            // Transaction list
+            if (transactions.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "No transactions yet",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TngTextSecondary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Completed transactions will appear here",
+                            fontSize = 14.sp,
+                            color = TngTextMuted
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(transactions) { item ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "${item.tx.currency} ${"%.2f".format(item.tx.amount)}",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp,
+                                        color = TngTextPrimary
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        dateFormat.format(Date(item.tx.timestamp)),
+                                        fontSize = 12.sp,
+                                        color = TngTextMuted
+                                    )
+                                    Text(
+                                        "ID: ${item.txId.take(12)}...",
+                                        fontSize = 11.sp,
+                                        color = TngTextMuted,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                // Sync status badge
+                                val (badgeColor, badgeText) = when (item.tx.syncStatus) {
+                                    "synced" -> Pair(TngSuccess, "Synced")
+                                    else -> Pair(TngWarning, "Pending")
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .background(badgeColor.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        badgeText,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = badgeColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sync section at bottom
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
+                SyncSection(
+                    side = side,
+                    isPushing = isPushing,
+                    isPulling = isPulling,
+                    syncMessage = syncMessage,
+                    onPush = onPush,
+                    onPull = onPull,
+                    onDismissSync = onDismissSync
+                )
+            }
+        }
+    }
+
     // ─── Sync Section ─────────────────────────────────────────────────────────────
 
     @Composable
@@ -666,12 +824,7 @@ class MainActivity : FragmentActivity() {
         errorMsg: String?,
         onMakeDiscoverable: () -> Unit,
         onReset: () -> Unit,
-        isPushing: Boolean = false,
-        isPulling: Boolean = false,
-        syncMessage: String? = null,
-        onPush: () -> Unit = {},
-        onPull: () -> Unit = {},
-        onDismissSync: () -> Unit = {}
+        onShowHistory: () -> Unit
     ) {
         val qrBitmap = remember(txManager) {
             txManager?.generateVendorQrPayload()?.let { payload ->
@@ -822,17 +975,9 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            // Sync section + bottom buttons
+            // Bottom buttons
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                SyncSection(
-                    side = "merchant",
-                    isPushing = isPushing,
-                    isPulling = isPulling,
-                    syncMessage = syncMessage,
-                    onPush = onPush,
-                    onPull = onPull,
-                    onDismissSync = onDismissSync
-                )
+                TngPrimaryButton(text = "Transaction History", onClick = onShowHistory)
                 Spacer(modifier = Modifier.height(8.dp))
                 TngSecondaryButton(text = "Back to Role Selection", onClick = onReset)
             }
@@ -861,12 +1006,7 @@ class MainActivity : FragmentActivity() {
         onPay: () -> Unit,
         onBiometricConfirm: () -> Unit,
         onReset: () -> Unit,
-        isPushing: Boolean = false,
-        isPulling: Boolean = false,
-        syncMessage: String? = null,
-        onPush: () -> Unit = {},
-        onPull: () -> Unit = {},
-        onDismissSync: () -> Unit = {}
+        onShowHistory: () -> Unit
     ) {
         Column(
             modifier = Modifier
@@ -1061,17 +1201,9 @@ class MainActivity : FragmentActivity() {
                 }
             }
 
-            // Sync section + bottom buttons
+            // Bottom buttons
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
-                SyncSection(
-                    side = "user",
-                    isPushing = isPushing,
-                    isPulling = isPulling,
-                    syncMessage = syncMessage,
-                    onPush = onPush,
-                    onPull = onPull,
-                    onDismissSync = onDismissSync
-                )
+                TngPrimaryButton(text = "Transaction History", onClick = onShowHistory)
                 Spacer(modifier = Modifier.height(8.dp))
                 TngSecondaryButton(text = "Back to Role Selection", onClick = onReset)
             }
