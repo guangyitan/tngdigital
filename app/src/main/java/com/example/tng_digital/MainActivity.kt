@@ -364,6 +364,7 @@ class MainActivity : FragmentActivity() {
                 QRCodeUtils.generateQRCode(payload, 512)
             }
         }
+        var isDiscoverable by remember { mutableStateOf(false) }
 
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -398,23 +399,35 @@ class MainActivity : FragmentActivity() {
                     }
                 }
                 else -> {
-                    qrBitmap?.let { bmp ->
-                        Text("Show this QR to the consumer:", style = MaterialTheme.typography.labelLarge)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "Vendor QR Code",
-                            modifier = Modifier.size(240.dp)
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(txManager?.merchantName ?: "", fontWeight = FontWeight.Medium)
+                    if (isDiscoverable) {
+                        qrBitmap?.let { bmp ->
+                            Text("Show this QR to the consumer:", style = MaterialTheme.typography.labelLarge)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = "Vendor QR Code",
+                                modifier = Modifier.size(240.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(txManager?.merchantName ?: "", fontWeight = FontWeight.Medium)
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Waiting for consumer to connect…", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("Step 1: Make your device discoverable", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                isDiscoverable = true
+                                onMakeDiscoverable()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Make Device Discoverable (300s)")
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("QR code will appear after becoming discoverable.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onMakeDiscoverable, modifier = Modifier.fillMaxWidth()) {
-                        Text("Make Device Discoverable (300s)")
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Waiting for consumer to connect…", style = MaterialTheme.typography.bodySmall)
                 }
             }
 
