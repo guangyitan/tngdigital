@@ -1,17 +1,23 @@
 package com.example.tng_digital
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
+import androidx.core.app.ActivityCompat
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
 
 class BluetoothService(
+    private val context: Context,
     private val adapter: BluetoothAdapter?,
     private val onMessageReceived: (String) -> Unit,
     private val onStatusChanged: (String) -> Unit
@@ -27,12 +33,13 @@ class BluetoothService(
     @SuppressLint("MissingPermission")
     inner class AcceptThread : Thread() {
         private val mmServerSocket: BluetoothServerSocket? by lazy(LazyThreadSafetyMode.NONE) {
-            adapter?.listenUsingInsecureRfcommWithServiceRecord(serviceName, serviceUuid)
+            adapter?.listenUsingRfcommWithServiceRecord(serviceName, serviceUuid)
         }
 
         override fun run() {
             var shouldLoop = true
             while (shouldLoop) {
+                Log.d(tag, "Listening for connections...")
                 val socket: BluetoothSocket? = try {
                     mmServerSocket?.accept()
                 } catch (e: IOException) {
@@ -41,6 +48,7 @@ class BluetoothService(
                     null
                 }
                 socket?.also {
+                    Log.d(tag, "Connection accepted from ${it.remoteDevice.address}")
                     manageConnectedSocket(it)
                     mmServerSocket?.close()
                     shouldLoop = false
@@ -58,25 +66,40 @@ class BluetoothService(
     }
 
     @SuppressLint("MissingPermission")
-    inner class ConnectThread(device: BluetoothDevice) : Thread() {
+    inner class ConnectThread(private val device: BluetoothDevice) : Thread() {
         private val mmSocket: BluetoothSocket? by lazy(LazyThreadSafetyMode.NONE) {
             device.createRfcommSocketToServiceRecord(serviceUuid)
         }
 
         override fun run() {
+            Log.d(tag, "Attempting to connect to ${device.address}")
+            // Discovery is resource intensive and slows down connection, always cancel it
             adapter?.cancelDiscovery()
 
             mmSocket?.let { socket ->
                 try {
                     socket.connect()
+                    Log.d(tag, "Successfully connected to ${device.address}")
                     manageConnectedSocket(socket)
                 } catch (e: IOException) {
                     Log.e(tag, "Could not connect to socket", e)
-                    onStatusChanged("Connection failed")
+                    
+                    // Try fallback for some devices
                     try {
-                        socket.close()
-                    } catch (closeException: IOException) {
-                        Log.e(tag, "Could not close the client socket", closeException)
+                        Log.d(tag, "Trying fallback connection...")
+                        val fallbackSocket = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
+                            .invoke(device, 1) as BluetoothSocket
+                        fallbackSocket.connect()
+                        Log.d(tag, "Fallback connection successful")
+                        manageConnectedSocket(fallbackSocket)
+                    } catch (e2: Exception) {
+                        Log.e(tag, "Fallback connection also failed", e2)
+                        onStatusChanged("Connection failed")
+                        try {
+                            socket.close()
+                        } catch (closeException: IOException) {
+                            Log.e(tag, "Could not close the client socket", closeException)
+                        }
                     }
                 }
             }
@@ -141,7 +164,20 @@ class BluetoothService(
     @Synchronized
     fun connectToDevice(device: BluetoothDevice) {
         stop()
-        onStatusChanged("Connecting to ${device.name ?: device.address}...")
+        val deviceName = try {
+            if (ActivityCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+            ) {
+                device.name ?: device.address
+            } else {
+                device.address
+            }
+        } catch (e: SecurityException) {
+            device.address
+        }
+        onStatusChanged("Connecting to $deviceName...")
         connectThread = ConnectThread(device).apply { start() }
     }
 
