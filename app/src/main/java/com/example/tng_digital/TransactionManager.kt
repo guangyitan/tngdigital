@@ -122,10 +122,11 @@ class TransactionManager(
 
     // ─── Encrypt / Decrypt helpers ──────────────────────────────────────────────
 
-    private fun sendEncrypted(json: JSONObject) {
+    private fun sendEncrypted(json: JSONObject, code: MessageType) {
         val key = sessionKey
         val payload = if (key != null) {
             JSONObject().apply {
+                put("msg_type", code)
                 put("encrypted", CryptoService.encrypt(json.toString(), key))
             }.toString()
         } else {
@@ -181,7 +182,7 @@ class TransactionManager(
             consumerCertificate = ConsumerCertificate(consumerId, deviceId, signingPublicKeyB64, certExpiry, maxOfflineSpendLimit, "SIMULATED_CA_SIG"),
             signature = sig
         )
-        sendEncrypted(msg)
+        sendEncrypted(msg, MessageType.TX_REQUEST)
         setState(TransactionState.REQUEST_SENT)
     }
 
@@ -239,7 +240,7 @@ class TransactionManager(
             put("vendor_certificate", certJson)
             put("signature", ackSig)
         }
-        sendEncrypted(ackMsg)
+        sendEncrypted(ackMsg, MessageType.TX_ACK)
         setState(TransactionState.ACK_RECEIVED)
     }
 
@@ -313,7 +314,7 @@ class TransactionManager(
         localBalance = newBalance
         spendingCounter = newCounter
 
-        sendEncrypted(msg)
+        sendEncrypted(msg, MessageType.TX_CONFIRM)
         setState(TransactionState.CONFIRM_SENT)
     }
 
@@ -349,7 +350,7 @@ class TransactionManager(
             put("vendor_signature", receiptSig)
             put("consumer_signature_ref", consumerSig)
         }
-        sendEncrypted(receiptMsg)
+        sendEncrypted(receiptMsg, MessageType.TX_RECEIPT)
 
         val receipt = TxReceipt(
             txId = txId, consumerId = req.consumerId, vendorId = vendorId,
