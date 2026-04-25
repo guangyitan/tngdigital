@@ -106,13 +106,16 @@ class TransactionManager(
         val theirEcdhKey = json.getString("ecdh_pub_key")
         sessionKey = CryptoService.deriveSessionKey(ephemeralKeyPair.private, theirEcdhKey)
         Log.d(tag, "Session key derived (responder)")
+        val vcExpiry = certExpiry
+        val vcData = MockCA.vendorCertData(vendorId, deviceId, signingPublicKeyB64, merchantName, vcExpiry)
         val certJson = JSONObject().apply {
             put("vendor_id", vendorId)
             put("device_id", deviceId)
             put("public_key", signingPublicKeyB64)
             put("merchant_name", merchantName)
-            put("expiry", certExpiry)
-            put("ca_signature", "SIMULATED_CA_SIG")
+            put("expiry", vcExpiry)
+            put("ca_public_key", MockCA.publicKeyB64)
+            put("ca_signature", MockCA.sign(vcData))
         }
         val ack = JSONObject().apply {
             put("msg_type", MessageType.HANDSHAKE_ACK.code)
@@ -150,18 +153,32 @@ class TransactionManager(
             Log.d(tag, "QR signature verified against vendor certificate ✓")
         }
 
-        val caSignature = certObj.optString("ca_signature")
-        if (caSignature != "SIMULATED_CA_SIG") {
-            sendError("", "CERT_INVALID", "Vendor certificate not issued by a trusted CA")
+        val vcCaPublicKey = certObj.optString("ca_public_key")
+        val vcCaSig = certObj.optString("ca_signature")
+        val vcExpiry = certObj.optString("expiry")
+        val vcData = MockCA.vendorCertData(
+            certObj.optString("vendor_id"), certObj.optString("device_id"),
+            vendorPubKey, certObj.optString("merchant_name"), vcExpiry
+        )
+        if (!MockCA.verify(vcData, vcCaSig, vcCaPublicKey)) {
+            sendError("", "CERT_INVALID", "Vendor certificate CA signature invalid")
             return
         }
-
-        if (certObj.optString("expiry").isEmpty()) {
-            sendError("", "CERT_EXPIRED", "Vendor certificate expiry is missing")
+        if (qr != null && qr.caPublicKey.isNotEmpty() && vcCaPublicKey != qr.caPublicKey) {
+            sendError("", "CERT_INVALID", "Vendor CA key does not match QR-provisioned CA — possible spoofing")
             return
         }
-
-        Log.d(tag, "Vendor certificate verified ✓")
+        try {
+            val expiryDate = isoFmt.parse(vcExpiry)
+            if (expiryDate == null || expiryDate.before(Date())) {
+                sendError("", "CERT_EXPIRED", "Vendor certificate has expired")
+                return
+            }
+        } catch (e: Exception) {
+            sendError("", "CERT_EXPIRED", "Vendor certificate expiry unparseable")
+            return
+        }
+        Log.d(tag, "Vendor certificate CA verified ✓")
         setState(TransactionState.CHANNEL_READY)
     }
 
@@ -202,13 +219,17 @@ class TransactionManager(
         val sigData = "$txId|$consumerId|$amount|$currency|$ts|$counter"
         val sig = CryptoService.sign(sigData, signingKeyPair.private)
 
+        val ccExpiry = certExpiry
+        val ccData = MockCA.consumerCertData(consumerId, deviceId, signingPublicKeyB64, ccExpiry, maxOfflineSpendLimit)
+        val ccCaSig = MockCA.sign(ccData)
         val certJson = JSONObject().apply {
             put("consumer_id", consumerId)
             put("device_id", deviceId)
             put("public_key", signingPublicKeyB64)
-            put("expiry", certExpiry)
+            put("expiry", ccExpiry)
             put("max_offline_spend_limit", maxOfflineSpendLimit)
-            put("ca_signature", "SIMULATED_CA_SIG")
+            put("ca_public_key", MockCA.publicKeyB64)
+            put("ca_signature", ccCaSig)
         }
         val msg = JSONObject().apply {
             put("msg_type", MessageType.TX_REQUEST.code)
@@ -224,7 +245,7 @@ class TransactionManager(
         pendingRequest = TxRequest(
             txId = txId, consumerId = consumerId, amount = amount, currency = currency,
             timestamp = ts, spendingCounter = counter,
-            consumerCertificate = ConsumerCertificate(consumerId, deviceId, signingPublicKeyB64, certExpiry, maxOfflineSpendLimit, "SIMULATED_CA_SIG"),
+            consumerCertificate = ConsumerCertificate(consumerId, deviceId, signingPublicKeyB64, ccExpiry, maxOfflineSpendLimit, ccCaSig),
             signature = sig
         )
         sendEncrypted(msg, MessageType.TX_REQUEST)
@@ -249,27 +270,57 @@ class TransactionManager(
         if (amount <= 0) { sendError(txId, "SIG_INVALID", "Invalid amount"); return }
 
         val sigData = "$txId|$consumerId|$amount|$currency|$ts|$counter"
-        val valid = CryptoService.verify(sigData, sig, consumerPubKey)
-        Log.d(tag, "TX_REQUEST signature valid=$valid")
+        if (!CryptoService.verify(sigData, sig, consumerPubKey)) {
+            sendError(txId, "SIG_INVALID", "Consumer TX_REQUEST signature invalid")
+            return
+        }
+        Log.d(tag, "TX_REQUEST signature verified ✓")
+
+        val ccCaPublicKey = certObj.optString("ca_public_key")
+        val ccCaSig      = certObj.optString("ca_signature")
+        val ccExpiry     = certObj.optString("expiry")
+        val ccMaxSpend   = certObj.optDouble("max_offline_spend_limit", 0.0)
+        val ccData = MockCA.consumerCertData(
+            certObj.optString("consumer_id"), certObj.optString("device_id"),
+            consumerPubKey, ccExpiry, ccMaxSpend
+        )
+        if (!MockCA.verify(ccData, ccCaSig, ccCaPublicKey)) {
+            sendError(txId, "CERT_INVALID", "Consumer certificate CA signature invalid")
+            return
+        }
+        try {
+            val expiryDate = isoFmt.parse(ccExpiry)
+            if (expiryDate == null || expiryDate.before(Date())) {
+                sendError(txId, "CERT_EXPIRED", "Consumer certificate has expired")
+                return
+            }
+        } catch (e: Exception) {
+            sendError(txId, "CERT_EXPIRED", "Consumer certificate expiry unparseable")
+            return
+        }
+        Log.d(tag, "Consumer certificate CA verified ✓")
 
         seenTxIds.add(txId)
         val req = TxRequest(
             txId = txId, consumerId = consumerId, amount = amount, currency = currency,
             timestamp = ts, spendingCounter = counter,
-            consumerCertificate = ConsumerCertificate(consumerId, certObj.optString("device_id"), consumerPubKey, certObj.optString("expiry"), certObj.optDouble("max_offline_spend_limit", 0.0), ""),
+            consumerCertificate = ConsumerCertificate(consumerId, certObj.optString("device_id"), consumerPubKey, ccExpiry, ccMaxSpend, ccCaSig),
             signature = sig
         )
         pendingRequest = req
         onVendorRequestReceived(req)
 
         val ackTs = System.currentTimeMillis() / 1000
+        val ackExpiry = certExpiry
+        val ackVcData = MockCA.vendorCertData(vendorId, deviceId, signingPublicKeyB64, merchantName, ackExpiry)
         val certJson = JSONObject().apply {
             put("vendor_id", vendorId)
             put("device_id", deviceId)
             put("public_key", signingPublicKeyB64)
             put("merchant_name", merchantName)
-            put("expiry", certExpiry)
-            put("ca_signature", "SIMULATED_CA_SIG")
+            put("expiry", ackExpiry)
+            put("ca_public_key", MockCA.publicKeyB64)
+            put("ca_signature", MockCA.sign(ackVcData))
         }
         val ackSigData = "$txId|$vendorId|$amount|$currency|VENDOR_READY|$ackTs"
         val ackSig = CryptoService.sign(ackSigData, signingKeyPair.private)
@@ -307,14 +358,30 @@ class TransactionManager(
         if (txId != req.txId) { sendError(txId, "SIG_INVALID", "TX_ID mismatch"); return }
         if (amount != req.amount) { sendError(txId, "SIG_INVALID", "Amount mismatch in ACK"); return }
 
+        val ackCaPublicKey = certObj.optString("ca_public_key")
+        val ackCaSig      = certObj.optString("ca_signature")
+        val ackVcExpiry   = certObj.optString("expiry")
+        val ackVcData = MockCA.vendorCertData(
+            certObj.optString("vendor_id"), certObj.optString("device_id"),
+            vendorPubKey, certObj.optString("merchant_name"), ackVcExpiry
+        )
+        if (!MockCA.verify(ackVcData, ackCaSig, ackCaPublicKey)) {
+            sendError(txId, "CERT_INVALID", "Vendor certificate CA signature invalid in ACK")
+            return
+        }
+        Log.d(tag, "TX_ACK vendor certificate CA verified ✓")
+
         val sigData = "$txId|$vendorId|$amount|$currency|VENDOR_READY|$ts"
-        val valid = CryptoService.verify(sigData, sig, vendorPubKey)
-        Log.d(tag, "TX_ACK signature valid=$valid")
+        if (!CryptoService.verify(sigData, sig, vendorPubKey)) {
+            sendError(txId, "SIG_INVALID", "Vendor TX_ACK signature invalid")
+            return
+        }
+        Log.d(tag, "TX_ACK signature verified ✓")
 
         val ack = TxAck(
             txId = txId, vendorId = vendorId, merchantName = merchantName,
             amount = amount, currency = currency, timestamp = ts,
-            vendorCertificate = VendorCertificate(vendorId, certObj.optString("device_id"), vendorPubKey, merchantName, certObj.optString("expiry"), ""),
+            vendorCertificate = VendorCertificate(vendorId, certObj.optString("device_id"), vendorPubKey, merchantName, ackVcExpiry, ackCaSig),
             signature = sig
         )
         pendingAck = ack
@@ -443,6 +510,7 @@ class TransactionManager(
             put("timestamp", ts)
             put("nonce", nonce)
             put("vendor_cert_fingerprint", fingerprint)
+            put("ca_public_key", MockCA.publicKeyB64)
             put("signature", sig)
         }.toString()
     }
@@ -458,6 +526,7 @@ class TransactionManager(
                 timestamp = j.getLong("timestamp"),
                 nonce = j.getString("nonce"),
                 vendorCertFingerprint = j.getString("vendor_cert_fingerprint"),
+                caPublicKey = j.optString("ca_public_key", ""),
                 signature = j.getString("signature")
             )
             val ageSeconds = System.currentTimeMillis() / 1000 - qr.timestamp

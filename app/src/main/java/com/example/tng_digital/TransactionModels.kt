@@ -41,6 +41,7 @@ data class QrPayload(
     val timestamp: Long,
     val nonce: String,
     val vendorCertFingerprint: String,
+    val caPublicKey: String,
     val signature: String
 )
 
