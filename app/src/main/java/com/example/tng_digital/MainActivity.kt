@@ -266,7 +266,7 @@ class MainActivity : FragmentActivity() {
                 } catch (e: Exception) {
                     Log.e("TransactApp", "Session init failed", e)
                     sessionInitialized = true
-                    syncMessage = "Offline mode: ${e.message ?: "Could not reach server."}"
+                    syncMessage = "Offline mode — using local wallet data."
                 }
             }
         }
@@ -289,7 +289,7 @@ class MainActivity : FragmentActivity() {
                     }
                 } catch (e: Exception) {
                     Log.e("TransactApp", "Push failed", e)
-                    syncMessage = "Push failed: ${e.message ?: "Could not reach server."}"
+                    syncMessage = e.message ?: "Unable to sync transactions. Please try again."
                 } finally {
                     isPushing = false
                 }
@@ -311,7 +311,7 @@ class MainActivity : FragmentActivity() {
                     syncMessage = "Updated. Offline Balance: $balanceStr, ${res.transactions.size} tx(s) synced."
                 } catch (e: Exception) {
                     Log.e("TransactApp", "Pull failed", e)
-                    syncMessage = "Pull failed: ${e.message ?: "Could not reach server."}"
+                    syncMessage = e.message ?: "Unable to retrieve account data. Please try again."
                 } finally {
                     isPulling = false
                 }
@@ -581,6 +581,10 @@ class MainActivity : FragmentActivity() {
     ) {
         val transactions = remember(syncMessage, isPushing, isPulling) { SyncQueue.getQueue(side) }
         val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()) }
+        var insightText by remember { mutableStateOf<String?>(null) }
+        var insightLoading by remember { mutableStateOf(false) }
+        var insightError by remember { mutableStateOf<String?>(null) }
+        val coroutineScope = rememberCoroutineScope()
 
         Column(
             modifier = Modifier
@@ -616,6 +620,73 @@ class MainActivity : FragmentActivity() {
                         color = Color.White.copy(alpha = 0.7f),
                         fontSize = 14.sp
                     )
+                }
+            }
+
+            // AI Insights section
+            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+                if (insightText == null && !insightLoading) {
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                insightLoading = true
+                                insightError = null
+                                try {
+                                    insightText = ApiClient.getInsights()
+                                } catch (e: Exception) {
+                                    insightError = e.message ?: "Unable to generate insights. Please try again."
+                                } finally {
+                                    insightLoading = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = TngYellow,
+                            contentColor = TngBlueDark
+                        )
+                    ) {
+                        Text("AI Insights", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    }
+                } else {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = TngYellow.copy(alpha = 0.1f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    "AI Insights",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = TngBlueDark,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    "x",
+                                    modifier = Modifier
+                                        .clickable { insightText = null; insightError = null }
+                                        .padding(4.dp),
+                                    color = TngBlueDark,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            if (insightLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp).align(Alignment.CenterHorizontally),
+                                    color = TngBlueDark,
+                                    strokeWidth = 2.dp
+                                )
+                            } else if (insightError != null) {
+                                Text(insightError!!, fontSize = 13.sp, color = Color(0xFFCC0000))
+                            } else {
+                                Text(insightText ?: "", fontSize = 13.sp, color = TngTextPrimary)
+                            }
+                        }
+                    }
                 }
             }
 

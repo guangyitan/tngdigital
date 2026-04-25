@@ -30,13 +30,14 @@ object ApiClient {
             val code = conn.responseCode
             if (code != 200) {
                 val errBody = readErrorBody(conn)
-                throw ApiException("Session init failed (HTTP $code): $errBody")
+                Log.w(TAG, "Session init HTTP $code: $errBody")
+                throw ApiException("Unable to initialize session. Please check your connection and try again.")
             }
 
             val json = try {
                 JSONObject(conn.inputStream.bufferedReader().readText())
             } catch (e: Exception) {
-                throw ApiException("Session init: invalid JSON response")
+                throw ApiException("Unable to initialize session. Received an unexpected response from the server.")
             }
 
             SessionInitResponse(
@@ -88,7 +89,8 @@ object ApiClient {
             val code = conn.responseCode
             if (code != 200) {
                 val errBody = readErrorBody(conn)
-                throw ApiException("Push failed (HTTP $code): $errBody")
+                Log.w(TAG, "Push HTTP $code: $errBody")
+                throw ApiException("Unable to sync transactions. Please check your connection and try again.")
             }
 
             val json = try {
@@ -131,13 +133,14 @@ object ApiClient {
             val code = conn.responseCode
             if (code != 200) {
                 val errBody = readErrorBody(conn)
-                throw ApiException("Pull failed (HTTP $code): $errBody")
+                Log.w(TAG, "Pull HTTP $code: $errBody")
+                throw ApiException("Unable to retrieve account data. Please check your connection and try again.")
             }
 
             val json = try {
                 JSONObject(conn.inputStream.bufferedReader().readText())
             } catch (e: Exception) {
-                throw ApiException("Pull: invalid JSON response")
+                throw ApiException("Unable to retrieve account data. Received an unexpected response from the server.")
             }
 
             val txs = mutableListOf<ServerTransaction>()
@@ -172,6 +175,26 @@ object ApiClient {
                 offlineBalance = json.optDouble("offlineBalance", -1.0),
                 transactions = txs
             )
+        }
+    }
+
+    // ─── AI Insights (GET) ─────────────────────────────────────────────────
+
+    suspend fun getInsights(): String {
+        return withContext(Dispatchers.IO) {
+            val conn = openConnection("$BACKEND_URL/api/bedrock/invoke", "GET")
+            val code = conn.responseCode
+            if (code != 200) {
+                val errBody = readErrorBody(conn)
+                Log.w(TAG, "Insights HTTP $code: $errBody")
+                throw ApiException("Unable to generate insights at this time. Please try again later.")
+            }
+            val json = try {
+                JSONObject(conn.inputStream.bufferedReader().readText())
+            } catch (e: Exception) {
+                throw ApiException("Unable to generate insights. Received an unexpected response from the server.")
+            }
+            json.optString("message", "No insights available.")
         }
     }
 
