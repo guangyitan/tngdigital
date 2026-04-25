@@ -175,6 +175,10 @@ class BluetoothService(
 
     @Synchronized
     private fun manageConnectedSocket(socket: BluetoothSocket) {
+        connectThread = null
+        acceptThread = null
+        connectedThread?.cancel()
+        connectedThread = null
         connectedThread = ConnectedThread(socket).apply { start() }
     }
 
