@@ -40,6 +40,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.tng_digital.ui.theme.TngdigitalTheme
 import com.google.zxing.integration.android.IntentIntegrator
+import java.util.UUID
 
 class MainActivity : FragmentActivity() {
 
@@ -174,6 +175,7 @@ class MainActivity : FragmentActivity() {
         var amountText by remember { mutableStateOf("") }
         var vendorIncomingRequest by remember { mutableStateOf<TxRequest?>(null) }
         var isScanning by remember { mutableStateOf(false) }
+        var isBleScanning by remember { mutableStateOf(false) }
 
         val btService = remember { BluetoothService(adapter) }
         val txManager = remember(appRole) {
@@ -216,6 +218,7 @@ class MainActivity : FragmentActivity() {
                 errorMsg = errorMsg,
                 onMakeDiscoverable = {
                     btService.startServer()
+                    btService.startAdvertising(UUID.fromString(txManager?.serviceUuid ?: "8ce255c0-200a-11e0-ac64-0800200c9a66"))
                     startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE).apply {
                         putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
                     })
@@ -241,12 +244,29 @@ class MainActivity : FragmentActivity() {
                 amountText = amountText,
                 onAmountChange = { amountText = it },
                 isScanning = isScanning,
+                isBleScanning = isBleScanning,
                 discoveredDevices = discoveredDevices,
                 onScanQr = {
                     onQrScanned = { content ->
-                        txManager?.parseQrPayload(content)?.let { payload ->
-                            scannedQr = payload
-                        } ?: run { errorMsg = "Invalid QR code" }
+                        val mgr = txManager
+                        if (mgr == null) {
+                            errorMsg = "Select Consumer role before scanning"
+                        } else {
+                            val payload = mgr.parseQrPayload(content)
+                            if (payload != null) {
+                                scannedQr = payload
+                                isBleScanning = true
+                                btService.startBleScan(UUID.fromString(payload.serviceUuid)) { device ->
+                                    isBleScanning = false
+                                    if (device.bondState == BluetoothDevice.BOND_NONE) {
+                                        onPairingSuccess = { btService.connectToDevice(device) }
+                                        @SuppressLint("MissingPermission") device.createBond()
+                                    } else {
+                                        btService.connectToDevice(device)
+                                    }
+                                }
+                            }
+                        }
                     }
                     launchQrScanner()
                 },
@@ -275,6 +295,7 @@ class MainActivity : FragmentActivity() {
                 },
                 onBiometricConfirm = { showBiometricPrompt(txManager) },
                 onReset = {
+                    btService.stopBleScan()
                     btService.stop()
                     txManager?.reset()
                     scannedQr = null
@@ -283,6 +304,7 @@ class MainActivity : FragmentActivity() {
                     errorMsg = null
                     amountText = ""
                     isScanning = false
+                    isBleScanning = false
                     discoveredDevices.clear()
                     appRole = null
                 }
@@ -296,7 +318,7 @@ class MainActivity : FragmentActivity() {
         val executor = ContextCompat.getMainExecutor(this)
         val biometricManager = BiometricManager.from(this)
         val canAuth = biometricManager.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
         )
         if (canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
             Toast.makeText(this, "Biometric not available – confirm skipped for demo", Toast.LENGTH_SHORT).show()
@@ -418,6 +440,7 @@ class MainActivity : FragmentActivity() {
         amountText: String,
         onAmountChange: (String) -> Unit,
         isScanning: Boolean,
+        isBleScanning: Boolean,
         discoveredDevices: List<BluetoothDevice>,
         onScanQr: () -> Unit,
         onStartDiscovery: () -> Unit,
@@ -475,6 +498,7 @@ class MainActivity : FragmentActivity() {
                     QrScannedSection(
                         qr = scannedQr,
                         isScanning = isScanning,
+                        isBleScanning = isBleScanning,
                         discoveredDevices = discoveredDevices,
                         btAdapter = btAdapter,
                         onStartDiscovery = onStartDiscovery,
@@ -502,6 +526,7 @@ class MainActivity : FragmentActivity() {
     fun QrScannedSection(
         qr: QrPayload,
         isScanning: Boolean,
+        isBleScanning: Boolean,
         discoveredDevices: List<BluetoothDevice>,
         btAdapter: BluetoothAdapter,
         onStartDiscovery: () -> Unit,
@@ -515,33 +540,41 @@ class MainActivity : FragmentActivity() {
             }
         }
         Spacer(modifier = Modifier.height(12.dp))
-        Text("Step 2: Connect to the vendor's device", style = MaterialTheme.typography.titleMedium)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Paired devices:", style = MaterialTheme.typography.labelLarge)
-        val paired = btAdapter.bondedDevices?.toList() ?: emptyList()
-        if (paired.isNotEmpty()) {
-            LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                items(paired) { device ->
-                    Text(
-                        text = "${device.name ?: "Unknown"} (${device.address})",
-                        modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
-                    )
+        if (isBleScanning) {
+            CircularProgressIndicator()
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Locating vendor device via BLE…", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Will connect automatically once found.", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+        } else {
+            Text("Step 2: Connect to the vendor's device", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Paired devices:", style = MaterialTheme.typography.labelLarge)
+            val paired = btAdapter.bondedDevices?.toList() ?: emptyList()
+            if (paired.isNotEmpty()) {
+                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
+                    items(paired) { device ->
+                        Text(
+                            text = "${device.name ?: "Unknown"} (${device.address})",
+                            modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
+                        )
+                    }
                 }
             }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = onStartDiscovery, modifier = Modifier.fillMaxWidth()) {
-            Text(if (isScanning) "Scanning…" else "Search for Nearby Devices")
-        }
-        if (isScanning || discoveredDevices.isNotEmpty()) {
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Nearby:", style = MaterialTheme.typography.labelSmall)
-            LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                items(discoveredDevices) { device ->
-                    Text(
-                        text = "${device.name ?: "Unknown"} (${device.address})",
-                        modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
-                    )
+            Button(onClick = onStartDiscovery, modifier = Modifier.fillMaxWidth()) {
+                Text(if (isScanning) "Scanning…" else "Search for Nearby Devices")
+            }
+            if (isScanning || discoveredDevices.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text("Nearby:", style = MaterialTheme.typography.labelSmall)
+                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
+                    items(discoveredDevices) { device ->
+                        Text(
+                            text = "${device.name ?: "Unknown"} (${device.address})",
+                            modifier = Modifier.fillMaxWidth().clickable { onDeviceSelected(device) }.padding(8.dp)
+                        )
+                    }
                 }
             }
         }

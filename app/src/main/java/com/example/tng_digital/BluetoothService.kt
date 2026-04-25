@@ -12,6 +12,16 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.UUID
+import android.bluetooth.le.AdvertiseCallback
+import android.bluetooth.le.AdvertiseData
+import android.bluetooth.le.AdvertiseSettings
+import android.bluetooth.le.BluetoothLeAdvertiser
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.os.ParcelUuid
 
 class BluetoothService(
     private val adapter: BluetoothAdapter?,
@@ -29,6 +39,10 @@ class BluetoothService(
     private var acceptThread: AcceptThread? = null
     private var connectThread: ConnectThread? = null
     private var connectedThread: ConnectedThread? = null
+    private var bleAdvertiser: BluetoothLeAdvertiser? = null
+    private var bleScanner: BluetoothLeScanner? = null
+    private var bleScanCallback: ScanCallback? = null
+    private var advertiseCallback: AdvertiseCallback? = null
 
     @SuppressLint("MissingPermission")
     inner class AcceptThread : Thread() {
@@ -168,8 +182,81 @@ class BluetoothService(
         connectedThread?.write("$message\n".toByteArray(Charsets.UTF_8))
     }
 
+    @SuppressLint("MissingPermission")
+    fun startAdvertising(serviceUuid: UUID) {
+        val advertiser = adapter?.bluetoothLeAdvertiser ?: run {
+            Log.w(tag, "BLE advertiser not available")
+            return
+        }
+        bleAdvertiser = advertiser
+        val settings = AdvertiseSettings.Builder()
+            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            .setConnectable(true)
+            .setTimeout(0)
+            .build()
+        val data = AdvertiseData.Builder()
+            .addServiceUuid(ParcelUuid(serviceUuid))
+            .setIncludeDeviceName(false)
+            .build()
+        advertiseCallback = object : AdvertiseCallback() {
+            override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
+                Log.d(tag, "BLE advertising started")
+            }
+            override fun onStartFailure(errorCode: Int) {
+                Log.e(tag, "BLE advertising failed: $errorCode")
+                postMain { onStatusChanged("BLE advertising failed ($errorCode)") }
+            }
+        }
+        advertiser.startAdvertising(settings, data, advertiseCallback!!)
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stopAdvertising() {
+        advertiseCallback?.let { bleAdvertiser?.stopAdvertising(it) }
+        advertiseCallback = null
+        bleAdvertiser = null
+    }
+
+    @SuppressLint("MissingPermission")
+    fun startBleScan(serviceUuid: UUID, onDeviceFound: (BluetoothDevice) -> Unit) {
+        val scanner = adapter?.bluetoothLeScanner ?: run {
+            Log.w(tag, "BLE scanner not available")
+            return
+        }
+        stopBleScan()
+        bleScanner = scanner
+        val filter = ScanFilter.Builder()
+            .setServiceUuid(ParcelUuid(serviceUuid))
+            .build()
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .build()
+        bleScanCallback = object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                Log.d(tag, "BLE device found: ${result.device.address}")
+                stopBleScan()
+                postMain { onDeviceFound(result.device) }
+            }
+            override fun onScanFailed(errorCode: Int) {
+                Log.e(tag, "BLE scan failed: $errorCode")
+                postMain { onStatusChanged("BLE scan failed ($errorCode)") }
+            }
+        }
+        scanner.startScan(listOf(filter), settings, bleScanCallback!!)
+        postMain { onStatusChanged("Scanning for vendor via BLE…") }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun stopBleScan() {
+        bleScanCallback?.let { bleScanner?.stopScan(it) }
+        bleScanCallback = null
+        bleScanner = null
+    }
+
     @Synchronized
     fun stop() {
+        stopAdvertising()
+        stopBleScan()
         acceptThread?.cancel()
         acceptThread = null
         connectThread?.cancel()

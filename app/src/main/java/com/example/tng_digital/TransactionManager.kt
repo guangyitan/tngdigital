@@ -45,6 +45,7 @@ class TransactionManager(
 
     private var pendingRequest: TxRequest? = null
     private var pendingAck: TxAck? = null
+    private var scannedQrPayload: QrPayload? = null
 
     val deviceId = "DEV-${android.os.Build.MODEL.replace(" ", "-")}"
     val merchantName = "TNG Demo Vendor"
@@ -105,9 +106,18 @@ class TransactionManager(
         val theirEcdhKey = json.getString("ecdh_pub_key")
         sessionKey = CryptoService.deriveSessionKey(ephemeralKeyPair.private, theirEcdhKey)
         Log.d(tag, "Session key derived (responder)")
+        val certJson = JSONObject().apply {
+            put("vendor_id", vendorId)
+            put("device_id", deviceId)
+            put("public_key", signingPublicKeyB64)
+            put("merchant_name", merchantName)
+            put("expiry", certExpiry)
+            put("ca_signature", "SIMULATED_CA_SIG")
+        }
         val ack = JSONObject().apply {
             put("msg_type", MessageType.HANDSHAKE_ACK.code)
             put("ecdh_pub_key", ephemeralPublicKeyB64)
+            put("vendor_certificate", certJson)
         }
         sendRaw?.invoke(ack.toString())
         setState(TransactionState.CHANNEL_READY)
@@ -117,6 +127,41 @@ class TransactionManager(
         val theirEcdhKey = json.getString("ecdh_pub_key")
         sessionKey = CryptoService.deriveSessionKey(ephemeralKeyPair.private, theirEcdhKey)
         Log.d(tag, "Session key derived (initiator)")
+
+        val certObj = json.optJSONObject("vendor_certificate")
+        if (certObj == null) {
+            sendError("", "CERT_INVALID", "Vendor did not provide a certificate during handshake")
+            return
+        }
+
+        val vendorPubKey = certObj.optString("public_key")
+        val qr = scannedQrPayload
+        if (qr != null) {
+            val computedFingerprint = CryptoService.sha256Hash(vendorPubKey).take(16)
+            if (computedFingerprint != qr.vendorCertFingerprint) {
+                sendError("", "CERT_INVALID", "Vendor certificate fingerprint does not match QR code — possible spoofing")
+                return
+            }
+            val qrSigData = "${qr.vendorId}|${qr.merchantName}|${qr.serviceUuid}|${qr.timestamp}|${qr.nonce}"
+            if (!CryptoService.verify(qrSigData, qr.signature, vendorPubKey)) {
+                sendError("", "CERT_INVALID", "QR code signature invalid — vendor identity unconfirmed")
+                return
+            }
+            Log.d(tag, "QR signature verified against vendor certificate ✓")
+        }
+
+        val caSignature = certObj.optString("ca_signature")
+        if (caSignature != "SIMULATED_CA_SIG") {
+            sendError("", "CERT_INVALID", "Vendor certificate not issued by a trusted CA")
+            return
+        }
+
+        if (certObj.optString("expiry").isEmpty()) {
+            sendError("", "CERT_EXPIRED", "Vendor certificate expiry is missing")
+            return
+        }
+
+        Log.d(tag, "Vendor certificate verified ✓")
         setState(TransactionState.CHANNEL_READY)
     }
 
@@ -405,7 +450,7 @@ class TransactionManager(
     fun parseQrPayload(content: String): QrPayload? {
         return try {
             val j = JSONObject(content)
-            QrPayload(
+            val qr = QrPayload(
                 version = j.getInt("version"),
                 vendorId = j.getString("vendor_id"),
                 merchantName = j.getString("merchant_name"),
@@ -415,6 +460,22 @@ class TransactionManager(
                 vendorCertFingerprint = j.getString("vendor_cert_fingerprint"),
                 signature = j.getString("signature")
             )
+            val ageSeconds = System.currentTimeMillis() / 1000 - qr.timestamp
+            if (ageSeconds > 300) {
+                onError("QR code has expired. Ask the vendor to refresh their QR.")
+                return null
+            }
+            if (ageSeconds < -30) {
+                onError("QR code timestamp is in the future. Check device clocks.")
+                return null
+            }
+            if (qr.nonce in seenNonces) {
+                onError("This QR code has already been used (replay detected).")
+                return null
+            }
+            seenNonces.add(qr.nonce)
+            scannedQrPayload = qr
+            qr
         } catch (e: Exception) {
             Log.e(tag, "Failed to parse QR payload", e)
             null
