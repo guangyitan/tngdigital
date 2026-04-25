@@ -53,7 +53,7 @@ class TransactionManager(
     val consumerId = "CSM-${System.currentTimeMillis()}"
     val vendorId = "VND-${System.currentTimeMillis()}"
 
-    var localBalance: Double = 500.00
+    var localBalance: Double = 1000.00
     var spendingCounter: Int = 47
     val maxOfflineSpendLimit: Double = 500.00
 

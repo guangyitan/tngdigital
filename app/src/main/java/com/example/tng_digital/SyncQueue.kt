@@ -3,8 +3,8 @@ package com.example.tng_digital
 import android.util.Log
 
 /**
- * In-memory sync queue for pending offline transactions.
- * Mirrors expo_mobile's addToSyncQueue / markSynced / getSyncQueue pattern.
+ * In-memory sync queue for offline transactions.
+ * Keeps all transactions (even after sync) so history screen can display them.
  */
 object SyncQueue {
 
@@ -30,16 +30,21 @@ object SyncQueue {
     }
 
     fun markSynced(txIds: List<String>) {
-        queue.removeAll { it.txId in txIds }
+        val idSet = txIds.toSet()
+        for (i in queue.indices) {
+            if (queue[i].txId in idSet) {
+                queue[i] = queue[i].copy(tx = queue[i].tx.copy(syncStatus = "synced"))
+            }
+        }
         Log.d(TAG, "Marked ${txIds.size} as synced. Queue size: ${queue.size}")
     }
 
     fun pendingCount(side: String): Int {
-        return queue.count { it.side == side }
+        return queue.count { it.side == side && it.tx.syncStatus != "synced" }
     }
 
     fun totalPendingCount(): Int {
-        return queue.size
+        return queue.count { it.tx.syncStatus != "synced" }
     }
 
     fun clear() {

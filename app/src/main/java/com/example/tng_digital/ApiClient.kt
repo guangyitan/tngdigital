@@ -158,8 +158,15 @@ object ApiClient {
     private suspend fun mockPullAccount(req: PullRequest): PullResponse {
         delay(600)
         val queue = SyncQueue.getQueue(req.role)
+        // Compute balance: for consumer, subtract all tx amounts from initial 1000
+        val totalSpent = if (req.role == "user") queue.sumOf { it.tx.amount } else 0.0
+        val totalEarned = if (req.role == "merchant") queue.sumOf { it.tx.amount } else 0.0
+        val balance = if (req.role == "merchant") totalEarned else 1000.0 - totalSpent
+        // Mark all as synced in mock
+        val syncedTxIds = queue.map { it.txId }
+        SyncQueue.markSynced(syncedTxIds)
         return PullResponse(
-            offlineBalance = if (req.role == "merchant") 0.0 else 1000.0,
+            offlineBalance = balance,
             transactions = queue.map { it.tx.copy(syncStatus = "synced") }
         )
     }

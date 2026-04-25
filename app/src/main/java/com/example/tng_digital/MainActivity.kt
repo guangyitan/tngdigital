@@ -278,9 +278,9 @@ class MainActivity : FragmentActivity() {
                 try {
                     val side = if (appRole == AppRole.CONSUMER) "user" else "merchant"
                     val deviceId = txManager?.deviceId ?: "unknown"
-                    val queue = SyncQueue.getQueue(side)
+                    val queue = SyncQueue.getQueue(side).filter { it.tx.syncStatus != "synced" }
                     if (queue.isEmpty()) {
-                        syncMessage = "Nothing to push. No pending transactions."
+                        syncMessage = "Nothing to push. All transactions already synced."
                     } else {
                         val res = ApiClient.pushTransactions(SyncRequest(deviceId = deviceId, transactions = queue))
                         SyncQueue.markSynced(res.syncedTxIds)
@@ -305,7 +305,7 @@ class MainActivity : FragmentActivity() {
                     if (appRole == AppRole.CONSUMER) {
                         txManager?.localBalance = res.offlineBalance
                     }
-                    syncMessage = "Updated. Balance: MYR ${"%.2f".format(res.offlineBalance)}, ${res.transactions.size} tx(s) synced."
+                    syncMessage = "Updated. Offline Balance: MYR ${"%.2f".format(res.offlineBalance)}, ${res.transactions.size} tx(s) synced."
                 } catch (e: Exception) {
                     syncMessage = "Pull failed. Could not reach server."
                 } finally {
@@ -575,7 +575,7 @@ class MainActivity : FragmentActivity() {
         onDismissSync: () -> Unit,
         onBack: () -> Unit
     ) {
-        val transactions = remember { SyncQueue.getQueue(side) }
+        val transactions = remember(syncMessage, isPushing, isPulling) { SyncQueue.getQueue(side) }
         val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault()) }
 
         Column(
@@ -1040,7 +1040,7 @@ class MainActivity : FragmentActivity() {
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                             Text(
-                                "AVAILABLE BALANCE",
+                                "OFFLINE BALANCE",
                                 fontSize = 11.sp,
                                 color = Color.White.copy(alpha = 0.6f),
                                 letterSpacing = 1.5.sp,
@@ -1048,7 +1048,7 @@ class MainActivity : FragmentActivity() {
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "MYR ${"%.2f".format(txManager?.localBalance ?: 500.0)}",
+                                "MYR ${"%.2f".format(txManager?.localBalance ?: 1000.0)}",
                                 fontSize = 30.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White
