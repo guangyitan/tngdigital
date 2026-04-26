@@ -46,7 +46,8 @@ class TransactionManager(
     private var pendingRequest: TxRequest? = null
     private var pendingAck: TxAck? = null
 
-    val deviceId = "DEV-${android.os.Build.MODEL.replace(" ", "-")}"
+    private val rawDeviceId = "DEV-${android.os.Build.MODEL.replace(" ", "-")}"
+    val deviceId = if (role == AppRole.CONSUMER) "user-$rawDeviceId" else "merchant-$rawDeviceId"
     val merchantName = "TNG Demo Vendor"
     val serviceUuid = "8ce255c0-200a-11e0-ac64-0800200c9a66"
 
